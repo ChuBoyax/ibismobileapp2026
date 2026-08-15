@@ -117,11 +117,19 @@ export type Stat = {
   new_this_month: number;
 };
 
+/** Isang linya sa detail sheet. Ang backend ang pumipili kung ano ang laman. */
+export type ActivityDetail = {
+  label: string;
+  value: string | number;
+};
+
 export type ActivityItem = {
+  id: string;
   type: 'resident' | 'household' | 'document';
   title: string;
   subtitle: string;
   at: string;
+  details: ActivityDetail[];
 };
 
 export type DashboardData = {
@@ -138,6 +146,64 @@ export type DashboardData = {
 export async function dashboard() {
   const token = await getToken();
   return request<DashboardData>('/dashboard', { token });
+}
+
+// ── Notifications ───────────────────────────────────────────────────────
+
+export type Notification = {
+  id: string;
+  type: 'resident' | 'household' | 'document';
+  level: 'info' | 'warning' | 'success';
+  title: string;
+  body: string;
+  at: string | null;
+};
+
+export async function notifications() {
+  const token = await getToken();
+  return request<{ notifications: Notification[]; unread: number }>('/notifications', { token });
+}
+
+// ── Account ─────────────────────────────────────────────────────────────
+
+export type Account = {
+  id: number;
+  name: string;
+  email: string;
+  role: string | null;
+  barangays: { id: number; name: string }[];
+  member_since: string | null;
+};
+
+export async function account() {
+  const token = await getToken();
+  return request<{ account: Account }>('/account', { token });
+}
+
+export async function updateAccount(name: string, email: string) {
+  const token = await getToken();
+  return request<{ message: string; account: Account }>('/account', {
+    method: 'PUT',
+    token,
+    body: { name, email },
+  });
+}
+
+export async function updatePassword(
+  currentPassword: string,
+  password: string,
+  passwordConfirmation: string
+) {
+  const token = await getToken();
+  return request<{ message: string }>('/account/password', {
+    method: 'PUT',
+    token,
+    body: {
+      current_password: currentPassword,
+      password,
+      password_confirmation: passwordConfirmation,
+    },
+  });
 }
 
 /** Binubura ang token sa server. Hindi nagpapasabog kapag nabigo. */

@@ -9,25 +9,34 @@ import { Colors, FontSize, Radius, Shadow, Spacing } from '@/constants/theme';
 import { logout as apiLogout } from '@/lib/api';
 import {
   clearSecurity,
-  clearSession,
   hasPin,
   isBiometricEnabled,
   setBiometricEnabled,
 } from '@/lib/auth-storage';
 import { authenticate, getBiometricSupport, type BiometricSupport } from '@/lib/biometrics';
+import { clearCache } from '@/lib/db';
+import { endSession } from '@/lib/session';
 import { initialOf, useProfile } from '@/lib/use-profile';
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 
-type Option = { label: string; hint: string; icon: IoniconName; tint: string; color: string };
+type Option = {
+  label: string;
+  hint: string;
+  icon: IoniconName;
+  tint: string;
+  color: string;
+  onPress?: () => void;
+};
 
 const ACCOUNT: Option[] = [
   {
     label: 'Account Information',
-    hint: 'Name, email, contact number',
+    hint: 'Name, email, and password',
     icon: 'person-circle-outline',
     tint: Colors.primaryLight,
     color: Colors.primary,
+    onPress: () => router.push('/account'),
   },
   {
     label: 'Notifications',
@@ -35,6 +44,7 @@ const ACCOUNT: Option[] = [
     icon: 'notifications-outline',
     tint: Colors.warningLight,
     color: Colors.warning,
+    onPress: () => router.push('/notifications'),
   },
   {
     label: 'About IBIS',
@@ -157,7 +167,7 @@ export default function SettingsScreen() {
         // replace para hindi na makabalik sa dashboard gamit ang back button.
         onPress: async () => {
           await apiLogout(); // binabawi ang token sa server
-          await clearSession();
+          await endSession();
           router.replace('/login');
         },
       },
@@ -175,7 +185,7 @@ export default function SettingsScreen() {
           style: 'destructive',
           onPress: async () => {
             await apiLogout();
-            await clearSecurity();
+            await Promise.all([clearSecurity(), clearCache()]);
             setPinSet(false);
             setBiometricOn(false);
             router.replace('/login');

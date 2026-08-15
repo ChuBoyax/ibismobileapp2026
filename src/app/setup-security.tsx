@@ -94,10 +94,17 @@ export default function SetupSecurityScreen() {
   }
 
   function skip() {
-    Alert.alert('Skip security setup?', 'You can set a PIN later in Settings.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Skip', onPress: finish },
-    ]);
+    // Mahalagang malaman ito habang may internet pa: kapag walang PIN, ang
+    // password na lang ang paraan para makapasok — at kailangan iyon ng server.
+    Alert.alert(
+      'Skip security setup?',
+      'Without a PIN you will need internet and your password every time you sign in. ' +
+        'With a PIN you can get in even when there is no connection.',
+      [
+        { text: 'Set a PIN', style: 'cancel' },
+        { text: 'Skip anyway', style: 'destructive', onPress: finish },
+      ]
+    );
   }
 
   const isBiometricStep = step === 'biometric';

@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useRef, useState } from 'react';
 import {
@@ -15,8 +15,18 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Colors, FontSize, Radius, Shadow, Spacing } from '@/constants/theme';
-import { ApiError, dashboard, type ActivityItem, type DashboardData, type Stat } from '@/lib/api';
+import { ActivitySheet } from '@/components/activity-sheet';
+import {
+  ApiError,
+  dashboard,
+  notifications,
+  type ActivityItem,
+  type DashboardData,
+  type Stat,
+} from '@/lib/api';
 import { formatNumber, relativeTime } from '@/lib/format';
+import { CacheKey, getCache, putCache } from '@/lib/db';
+import { handleAuthError } from '@/lib/session';
 import { useProfile } from '@/lib/use-profile';
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
@@ -114,6 +124,10 @@ export default function DashboardScreen() {
   const profile = useProfile();
 
   const [data, setData] = useState<DashboardData | null>(null);
+  const [selected, setSelected] = useState<ActivityItem | null>(null);
+  const [unread, setUnread] = useState(0);
+  /** Kapag may laman, luma ang ipinapakitang datos — galing sa lokal na cache. */
+  const [staleAt, setStaleAt] = useState<Date | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -129,12 +143,37 @@ export default function DashboardScreen() {
 
       setData(result);
       setError('');
+      setStaleAt(null);
+
+      // Itinatabi para may maipakita kahit mawalan ng internet mamaya.
+      putCache(CacheKey.dashboard, result);
+
+      // Hiwalay at hindi mahalaga — kung mabigo, wala lang tuldok sa bell.
+      notifications()
+        .then((n) => {
+          if (mounted.current) setUnread(n.unread);
+        })
+        .catch(() => {});
     } catch (err) {
+      // Kung tinanggihan ang token, ibinabalik nito ang user sa login —
+      // walang saysay ang magpakita ng blangkong dashboard.
+      if (await handleAuthError(err)) return;
+
+      // Hindi naabot ang server. Imbes na blangkong screen, ipakita ang
+      // huling nakuha at sabihin nang malinaw kung kailan iyon.
+      const cached = await getCache<DashboardData>(CacheKey.dashboard);
+
       if (!mounted.current) return;
 
-      setError(
-        err instanceof ApiError ? err.message : 'Could not load the dashboard. Please try again.'
-      );
+      if (cached) {
+        setData(cached.value);
+        setStaleAt(cached.updatedAt);
+        setError('');
+      } else {
+        setError(
+          err instanceof ApiError ? err.message : 'Could not load the dashboard. Please try again.'
+        );
+      }
     } finally {
       if (mounted.current) {
         setLoading(false);
@@ -192,10 +231,14 @@ export default function DashboardScreen() {
               </Text>
             </View>
 
-            <View style={styles.bell}>
+            <Pressable
+              style={({ pressed }) => [styles.bell, pressed && styles.bellPressed]}
+              onPress={() => router.push('/notifications')}
+              accessibilityRole="button"
+              accessibilityLabel="Notifications">
               <Ionicons name="notifications-outline" size={20} color={Colors.onPrimary} />
-              <View style={styles.bellDot} />
-            </View>
+              {unread > 0 && <View style={styles.bellDot} />}
+            </Pressable>
           </View>
 
           <View style={styles.headerMeta}>
@@ -213,6 +256,18 @@ export default function DashboardScreen() {
               <View style={styles.flex}>
                 <Text style={styles.bannerText}>{error}</Text>
                 <Text style={styles.bannerHint}>Tap to retry</Text>
+              </View>
+            </Pressable>
+          )}
+
+          {!!staleAt && (
+            <Pressable style={styles.offlineBanner} onPress={() => load(true)}>
+              <Ionicons name="cloud-offline-outline" size={18} color={Colors.warning} />
+              <View style={styles.flex}>
+                <Text style={styles.offlineTitle}>Offline — showing saved data</Text>
+                <Text style={styles.offlineHint}>
+                  Last updated {relativeTime(staleAt.toISOString())} · Tap to retry
+                </Text>
               </View>
             </Pressable>
           )}
@@ -258,12 +313,15 @@ export default function DashboardScreen() {
                 const style = ACTIVITY_STYLE[item.type] ?? ACTIVITY_STYLE.resident;
 
                 return (
-                  <View
-                    key={`${item.type}-${item.at}-${index}`}
-                    style={[
+                  <Pressable
+                    key={item.id}
+                    onPress={() => setSelected(item)}
+                    style={({ pressed }) => [
                       styles.activityRow,
                       index === data.activity.length - 1 && styles.lastRow,
-                    ]}>
+                      pressed && styles.activityRowPressed,
+                    ]}
+                    accessibilityRole="button">
                     <View style={[styles.activityIcon, { backgroundColor: style.tint }]}>
                       <Ionicons name={style.icon} size={16} color={style.color} />
                     </View>
@@ -278,13 +336,15 @@ export default function DashboardScreen() {
                     </View>
 
                     <Ionicons name="chevron-forward" size={16} color={Colors.border} />
-                  </View>
+                  </Pressable>
                 );
               })
             )}
           </View>
         </View>
       </ScrollView>
+
+      <ActivitySheet item={selected} onClose={() => setSelected(null)} />
     </View>
   );
 }
@@ -342,6 +402,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  bellPressed: {
+    opacity: 0.7,
+  },
   bellDot: {
     position: 'absolute',
     top: 10,
@@ -377,6 +440,25 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
     backgroundColor: Colors.dangerLight,
     borderRadius: Radius.md,
+  },
+  offlineBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    marginBottom: Spacing.lg,
+    padding: Spacing.md,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.warningLight,
+  },
+  offlineTitle: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.warning,
+  },
+  offlineHint: {
+    marginTop: 2,
+    fontSize: FontSize.xs,
+    color: Colors.warning,
   },
   bannerText: {
     fontSize: FontSize.sm,
@@ -523,6 +605,9 @@ const styles = StyleSheet.create({
     fontSize: FontSize.sm,
     fontWeight: '600',
     color: Colors.text,
+  },
+  activityRowPressed: {
+    backgroundColor: Colors.primaryLight,
   },
   activityTime: {
     marginTop: 2,
