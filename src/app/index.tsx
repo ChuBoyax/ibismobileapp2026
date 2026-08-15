@@ -4,21 +4,40 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, Image, StyleSheet, View } from 'react-native';
 
 import { Colors, Radius, Spacing } from '@/constants/theme';
-import { hasPin } from '@/lib/auth-storage';
+import { getToken, hasPin } from '@/lib/auth-storage';
+
+type Target = '/lock' | '/login' | '/dashboard';
 
 /**
- * Entry point ng app. Tinitingnan muna kung may naka-set nang PIN:
- * kung meron, diretso sa lock screen; kung wala, sa login form.
+ * Entry point ng app.
+ *
+ * Dalawang magkaibang bagay ang tinitingnan dito:
+ *
+ *  • Ang API token — ito ang session sa server. Kung wala, walang datos na
+ *    makukuha kahit gaano pa kahusay ang lokal na seguridad.
+ *  • Ang PIN — lokal na kandado lang ng device. Hindi ito nagpapatunay ng
+ *    sinuman sa backend.
+ *
+ * Kaya kailangan munang may token bago pa man isipin ang PIN. Kung wala,
+ * diretso sa buong password login — kahit may naka-set nang PIN.
  */
 export default function Index() {
-  const [target, setTarget] = useState<'/lock' | '/login' | null>(null);
+  const [target, setTarget] = useState<Target | null>(null);
 
   useEffect(() => {
     let active = true;
 
-    hasPin()
-      .then((locked) => {
-        if (active) setTarget(locked ? '/lock' : '/login');
+    async function decide(): Promise<Target> {
+      const token = await getToken();
+
+      if (!token) return '/login';
+
+      return (await hasPin()) ? '/lock' : '/dashboard';
+    }
+
+    decide()
+      .then((next) => {
+        if (active) setTarget(next);
       })
       .catch(() => {
         // Kung may problema sa storage, huwag i-lock ang user sa labas.
