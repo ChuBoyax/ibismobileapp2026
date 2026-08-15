@@ -16,12 +16,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { TextField } from '@/components/text-field';
 import { Colors, FontSize, Radius, Spacing } from '@/constants/theme';
-import { hasPin, saveEmail } from '@/lib/auth-storage';
-
-// Pansamantalang hardcoded na credentials. Papalitan ito ng tunay na API call
-// kapag nakakabit na ang backend.
-const DEMO_EMAIL = 'admin@gmail.com';
-const DEMO_PASSWORD = 'password123';
+import { ApiError, login as loginRequest } from '@/lib/api';
+import { hasPin, saveEmail, saveProfile, saveToken } from '@/lib/auth-storage';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -39,11 +35,13 @@ export default function LoginScreen() {
   const [formError, setFormError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Hawak natin ang timer para kanselahin kapag umalis sa screen habang "nagla-login".
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Iniiwasan ang setState pagkatapos umalis sa screen habang tumatakbo pa
+  // ang request — hindi kayang kanselahin ng React ang natapos nang await.
+  const mounted = useRef(true);
   useEffect(() => {
+    mounted.current = true;
     return () => {
-      if (timer.current) clearTimeout(timer.current);
+      mounted.current = false;
     };
   }, []);
 
@@ -65,32 +63,35 @@ export default function LoginScreen() {
     return next;
   }
 
-  function handleLogin() {
+  async function handleLogin() {
     setFormError('');
 
     const found = validate();
     setErrors(found);
     if (Object.keys(found).length > 0) return;
 
-    // WALA PANG BACKEND — pinipeke lang natin ang network delay para makita ang loading state.
+    const normalized = email.trim().toLowerCase();
     setLoading(true);
-    timer.current = setTimeout(async () => {
-      const normalized = email.trim().toLowerCase();
-      const ok = normalized === DEMO_EMAIL && password === DEMO_PASSWORD;
 
-      if (!ok) {
-        setLoading(false);
-        setFormError('Invalid email or password.');
-        return;
-      }
+    try {
+      const { token, user } = await loginRequest(normalized, password);
 
-      await saveEmail(normalized);
-      setLoading(false);
+      await Promise.all([saveToken(token), saveProfile(user), saveEmail(user.email)]);
 
       // Kapag wala pang PIN, dumadaan muna sa security setup bago ang dashboard.
       // replace (hindi push) para hindi na makabalik sa login gamit ang back button.
-      router.replace((await hasPin()) ? '/dashboard' : '/setup-security');
-    }, 1200);
+      const next = (await hasPin()) ? '/dashboard' : '/setup-security';
+
+      if (mounted.current) setLoading(false);
+      router.replace(next);
+    } catch (error) {
+      if (!mounted.current) return;
+
+      setLoading(false);
+      setFormError(
+        error instanceof ApiError ? error.message : 'Something went wrong. Please try again.'
+      );
+    }
   }
 
   return (

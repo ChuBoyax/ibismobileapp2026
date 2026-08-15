@@ -6,13 +6,16 @@ import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 're
 
 import { ScreenHeader } from '@/components/screen-header';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '@/constants/theme';
+import { logout as apiLogout } from '@/lib/api';
 import {
   clearSecurity,
+  clearSession,
   hasPin,
   isBiometricEnabled,
   setBiometricEnabled,
 } from '@/lib/auth-storage';
 import { authenticate, getBiometricSupport, type BiometricSupport } from '@/lib/biometrics';
+import { initialOf, useProfile } from '@/lib/use-profile';
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -91,6 +94,7 @@ function Row({
 }
 
 export default function SettingsScreen() {
+  const profile = useProfile();
   const [biometric, setBiometric] = useState<BiometricSupport | null>(null);
   const [biometricOn, setBiometricOn] = useState(false);
   const [pinSet, setPinSet] = useState(false);
@@ -151,7 +155,11 @@ export default function SettingsScreen() {
         style: 'destructive',
         // Hindi binubura ang PIN — session lang ang tinatapos.
         // replace para hindi na makabalik sa dashboard gamit ang back button.
-        onPress: () => router.replace('/login'),
+        onPress: async () => {
+          await apiLogout(); // binabawi ang token sa server
+          await clearSession();
+          router.replace('/login');
+        },
       },
     ]);
   }
@@ -166,6 +174,7 @@ export default function SettingsScreen() {
           text: 'Remove',
           style: 'destructive',
           onPress: async () => {
+            await apiLogout();
             await clearSecurity();
             setPinSet(false);
             setBiometricOn(false);
@@ -187,17 +196,23 @@ export default function SettingsScreen() {
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.profileCard}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>A</Text>
+            <Text style={styles.avatarText}>{initialOf(profile?.name)}</Text>
           </View>
 
           <View style={styles.flex}>
-            <Text style={styles.name}>Admin</Text>
-            <Text style={styles.email}>admin@gmail.com</Text>
+            <Text style={styles.name} numberOfLines={1}>
+              {profile?.name ?? '—'}
+            </Text>
+            <Text style={styles.email} numberOfLines={1}>
+              {profile?.email ?? 'Not signed in'}
+            </Text>
           </View>
 
-          <View style={styles.rolePill}>
-            <Text style={styles.rolePillText}>Administrator</Text>
-          </View>
+          {!!profile?.role && (
+            <View style={styles.rolePill}>
+              <Text style={styles.rolePillText}>{profile.role}</Text>
+            </View>
+          )}
         </View>
 
         <Text style={styles.groupLabel}>SECURITY</Text>

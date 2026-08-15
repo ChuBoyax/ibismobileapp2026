@@ -4,6 +4,7 @@ import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Colors, FontSize, Radius, Shadow, Spacing } from '@/constants/theme';
+import { barangayLabel, useProfile } from '@/lib/use-profile';
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 type Tone = 'up' | 'down' | 'flat';
@@ -116,6 +117,7 @@ function SectionTitle({ title, action }: { title: string; action?: string }) {
 
 export default function DashboardScreen() {
   const insets = useSafeAreaInsets();
+  const profile = useProfile();
 
   return (
     <View style={styles.screen}>
@@ -134,7 +136,9 @@ export default function DashboardScreen() {
 
             <View style={styles.flex}>
               <Text style={styles.greeting}>Good day,</Text>
-              <Text style={styles.name}>Admin</Text>
+              <Text style={styles.name} numberOfLines={1}>
+                {profile?.name ?? '—'}
+              </Text>
             </View>
 
             <View style={styles.bell}>
@@ -145,7 +149,9 @@ export default function DashboardScreen() {
 
           <View style={styles.headerMeta}>
             <Ionicons name="location-outline" size={13} color={Colors.primaryLight} />
-            <Text style={styles.headerMetaText}>Barangay Bato · Leyte</Text>
+            <Text style={styles.headerMetaText} numberOfLines={1}>
+              {barangayLabel(profile)}
+            </Text>
           </View>
         </View>
 
