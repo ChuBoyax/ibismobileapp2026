@@ -1,59 +1,61 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Image,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Colors, FontSize, Radius, Shadow, Spacing } from '@/constants/theme';
-import { barangayLabel, useProfile } from '@/lib/use-profile';
+import { ApiError, dashboard, type ActivityItem, type DashboardData, type Stat } from '@/lib/api';
+import { formatNumber, relativeTime } from '@/lib/format';
+import { useProfile } from '@/lib/use-profile';
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
-type Tone = 'up' | 'down' | 'flat';
 
-// PEKENG DATOS — pang-UI lang muna. Papalitan ng galing sa API.
-const STATS: {
+/** Hitsura ng bawat stat card. Ang bilang ay galing sa server. */
+const STAT_META: {
+  key: keyof DashboardData['stats'];
   label: string;
-  value: string;
   icon: IoniconName;
   tint: string;
   color: string;
-  trend: string;
-  tone: Tone;
 }[] = [
   {
+    key: 'residents',
     label: 'Total Residents',
-    value: '1,248',
     icon: 'people',
     tint: Colors.primaryLight,
     color: Colors.primary,
-    trend: '+2.4%',
-    tone: 'up',
   },
   {
+    key: 'families',
     label: 'Families',
-    value: '312',
     icon: 'person-add',
     tint: Colors.infoLight,
     color: Colors.info,
-    trend: '+1.1%',
-    tone: 'up',
   },
   {
+    key: 'households',
     label: 'Households',
-    value: '289',
     icon: 'home',
     tint: Colors.warningLight,
     color: Colors.warning,
-    trend: '+0.8%',
-    tone: 'up',
   },
   {
-    label: 'Pending Requests',
-    value: '7',
+    key: 'pending_documents',
+    label: 'Pending Documents',
     icon: 'document-text',
     tint: Colors.dangerLight,
     color: Colors.danger,
-    trend: '2 urgent',
-    tone: 'flat',
   },
 ];
 
@@ -63,48 +65,12 @@ const QUICK_ACTIONS: { label: string; icon: IoniconName }[] = [
   { label: 'Generate Report', icon: 'document-text-outline' },
 ];
 
-const ACTIVITY: { title: string; time: string; icon: IoniconName; tint: string; color: string }[] = [
+const ACTIVITY_STYLE: Record<ActivityItem['type'], { icon: IoniconName; tint: string; color: string }> =
   {
-    title: 'New resident registered',
-    time: 'Juan Dela Cruz · 10 minutes ago',
-    icon: 'person-add',
-    tint: Colors.primaryLight,
-    color: Colors.primary,
-  },
-  {
-    title: 'Barangay clearance requested',
-    time: 'Maria Santos · 1 hour ago',
-    icon: 'document-text',
-    tint: Colors.infoLight,
-    color: Colors.info,
-  },
-  {
-    title: 'Household record updated',
-    time: 'Purok 3 · 3 hours ago',
-    icon: 'home',
-    tint: Colors.warningLight,
-    color: Colors.warning,
-  },
-  {
-    title: 'Monthly population report generated',
-    time: 'System · Yesterday',
-    icon: 'bar-chart',
-    tint: Colors.primaryLight,
-    color: Colors.primary,
-  },
-];
-
-const TREND_ICON: Record<Tone, IoniconName> = {
-  up: 'trending-up',
-  down: 'trending-down',
-  flat: 'ellipse',
-};
-
-const TREND_COLOR: Record<Tone, string> = {
-  up: Colors.primary,
-  down: Colors.danger,
-  flat: Colors.muted,
-};
+    resident: { icon: 'person-add', tint: Colors.primaryLight, color: Colors.primary },
+    household: { icon: 'home', tint: Colors.warningLight, color: Colors.warning },
+    document: { icon: 'document-text', tint: Colors.infoLight, color: Colors.info },
+  };
 
 function SectionTitle({ title, action }: { title: string; action?: string }) {
   return (
@@ -115,15 +81,100 @@ function SectionTitle({ title, action }: { title: string; action?: string }) {
   );
 }
 
+function StatCard({ meta, stat }: { meta: (typeof STAT_META)[number]; stat?: Stat }) {
+  const isNew = (stat?.new_this_month ?? 0) > 0;
+
+  return (
+    <View style={styles.statCard}>
+      <View style={styles.statTop}>
+        <View style={[styles.statIcon, { backgroundColor: meta.tint }]}>
+          <Ionicons name={meta.icon} size={18} color={meta.color} />
+        </View>
+
+        {isNew ? (
+          <View style={styles.trendRow}>
+            <Ionicons name="trending-up" size={12} color={Colors.primary} />
+            <Text style={[styles.trendText, { color: Colors.primary }]}>
+              +{stat?.new_this_month}
+            </Text>
+          </View>
+        ) : (
+          <Text style={[styles.trendText, { color: Colors.muted }]}>—</Text>
+        )}
+      </View>
+
+      <Text style={styles.statValue}>{stat ? formatNumber(stat.total) : '–'}</Text>
+      <Text style={styles.statLabel}>{meta.label}</Text>
+    </View>
+  );
+}
+
 export default function DashboardScreen() {
   const insets = useSafeAreaInsets();
   const profile = useProfile();
+
+  const [data, setData] = useState<DashboardData | null>(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const mounted = useRef(true);
+
+  const load = useCallback(async (isRefresh = false) => {
+    if (isRefresh) setRefreshing(true);
+
+    try {
+      const result = await dashboard();
+      if (!mounted.current) return;
+
+      setData(result);
+      setError('');
+    } catch (err) {
+      if (!mounted.current) return;
+
+      setError(
+        err instanceof ApiError ? err.message : 'Could not load the dashboard. Please try again.'
+      );
+    } finally {
+      if (mounted.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      mounted.current = true;
+      load();
+
+      return () => {
+        mounted.current = false;
+      };
+    }, [load])
+  );
+
+  // Barangay galing sa dashboard response; profile ang panandaliang kapalit
+  // habang naghihintay ng unang request.
+  const barangays = data?.barangays.length
+    ? data.barangays.join(' · ')
+    : (profile?.barangays.map((b) => b.name.trim()).join(' · ') ?? '');
 
   return (
     <View style={styles.screen}>
       <StatusBar style="light" />
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => load(true)}
+            colors={[Colors.primary]}
+            tintColor={Colors.primary}
+          />
+        }>
         <View style={[styles.header, { paddingTop: insets.top + Spacing.lg }]}>
           <View style={styles.headerRow}>
             <View style={styles.seal}>
@@ -150,37 +201,34 @@ export default function DashboardScreen() {
           <View style={styles.headerMeta}>
             <Ionicons name="location-outline" size={13} color={Colors.primaryLight} />
             <Text style={styles.headerMetaText} numberOfLines={1}>
-              {barangayLabel(profile)}
+              {barangays || 'No barangay assigned'}
             </Text>
           </View>
         </View>
 
-        {/* Umaangat ang content papasok sa header para lumutang ang mga card. */}
         <View style={styles.content}>
-          <View style={styles.statGrid}>
-            {STATS.map((stat) => (
-              <View key={stat.label} style={styles.statCard}>
-                <View style={styles.statTop}>
-                  <View style={[styles.statIcon, { backgroundColor: stat.tint }]}>
-                    <Ionicons name={stat.icon} size={18} color={stat.color} />
-                  </View>
-                  <View style={styles.trendRow}>
-                    <Ionicons
-                      name={TREND_ICON[stat.tone]}
-                      size={stat.tone === 'flat' ? 6 : 12}
-                      color={TREND_COLOR[stat.tone]}
-                    />
-                    <Text style={[styles.trendText, { color: TREND_COLOR[stat.tone] }]}>
-                      {stat.trend}
-                    </Text>
-                  </View>
-                </View>
-
-                <Text style={styles.statValue}>{stat.value}</Text>
-                <Text style={styles.statLabel}>{stat.label}</Text>
+          {!!error && (
+            <Pressable style={styles.banner} onPress={() => load()}>
+              <Ionicons name="cloud-offline-outline" size={18} color={Colors.danger} />
+              <View style={styles.flex}>
+                <Text style={styles.bannerText}>{error}</Text>
+                <Text style={styles.bannerHint}>Tap to retry</Text>
               </View>
-            ))}
-          </View>
+            </Pressable>
+          )}
+
+          {loading && !data ? (
+            <View style={styles.loading}>
+              <ActivityIndicator color={Colors.primary} />
+              <Text style={styles.loadingText}>Loading barangay data…</Text>
+            </View>
+          ) : (
+            <View style={styles.statGrid}>
+              {STAT_META.map((meta) => (
+                <StatCard key={meta.key} meta={meta} stat={data?.stats[meta.key]} />
+              ))}
+            </View>
+          )}
 
           <SectionTitle title="Quick Actions" />
           <View style={styles.actionRow}>
@@ -196,22 +244,44 @@ export default function DashboardScreen() {
             ))}
           </View>
 
-          <SectionTitle title="Recent Activity" action="See all" />
+          <SectionTitle title="Recent Activity" />
           <View style={styles.activityCard}>
-            {ACTIVITY.map((item, index) => (
-              <View
-                key={item.title}
-                style={[styles.activityRow, index === ACTIVITY.length - 1 && styles.lastRow]}>
-                <View style={[styles.activityIcon, { backgroundColor: item.tint }]}>
-                  <Ionicons name={item.icon} size={16} color={item.color} />
-                </View>
-                <View style={styles.flex}>
-                  <Text style={styles.activityTitle}>{item.title}</Text>
-                  <Text style={styles.activityTime}>{item.time}</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={16} color={Colors.border} />
+            {!data?.activity.length ? (
+              <View style={styles.empty}>
+                <Ionicons name="time-outline" size={22} color={Colors.muted} />
+                <Text style={styles.emptyText}>
+                  {loading ? 'Loading…' : 'No recent activity in your barangay yet.'}
+                </Text>
               </View>
-            ))}
+            ) : (
+              data.activity.map((item, index) => {
+                const style = ACTIVITY_STYLE[item.type] ?? ACTIVITY_STYLE.resident;
+
+                return (
+                  <View
+                    key={`${item.type}-${item.at}-${index}`}
+                    style={[
+                      styles.activityRow,
+                      index === data.activity.length - 1 && styles.lastRow,
+                    ]}>
+                    <View style={[styles.activityIcon, { backgroundColor: style.tint }]}>
+                      <Ionicons name={style.icon} size={16} color={style.color} />
+                    </View>
+
+                    <View style={styles.flex}>
+                      <Text style={styles.activityTitle} numberOfLines={1}>
+                        {item.title}
+                      </Text>
+                      <Text style={styles.activityTime} numberOfLines={1}>
+                        {item.subtitle} · {relativeTime(item.at)}
+                      </Text>
+                    </View>
+
+                    <Ionicons name="chevron-forward" size={16} color={Colors.border} />
+                  </View>
+                );
+              })
+            )}
           </View>
         </View>
       </ScrollView>
@@ -233,7 +303,6 @@ const styles = StyleSheet.create({
   header: {
     backgroundColor: Colors.primary,
     paddingHorizontal: Spacing.xl,
-    // Sobrang padding sa ilalim para may masakop ang umaangat na content.
     paddingBottom: Spacing.xxl + Spacing.xl,
     borderBottomLeftRadius: Radius.lg,
     borderBottomRightRadius: Radius.lg,
@@ -291,6 +360,7 @@ const styles = StyleSheet.create({
     marginTop: Spacing.lg,
   },
   headerMetaText: {
+    flex: 1,
     fontSize: FontSize.xs,
     color: Colors.primaryLight,
     letterSpacing: 0.2,
@@ -299,14 +369,43 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.xl,
     marginTop: -Spacing.xxl,
   },
+  banner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    padding: Spacing.lg,
+    marginBottom: Spacing.md,
+    backgroundColor: Colors.dangerLight,
+    borderRadius: Radius.md,
+  },
+  bannerText: {
+    fontSize: FontSize.sm,
+    fontWeight: '600',
+    color: Colors.danger,
+  },
+  bannerHint: {
+    marginTop: 2,
+    fontSize: FontSize.xs,
+    color: Colors.danger,
+  },
+  loading: {
+    alignItems: 'center',
+    gap: Spacing.md,
+    paddingVertical: Spacing.xxl,
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.lg,
+    ...Shadow.card,
+  },
+  loadingText: {
+    fontSize: FontSize.sm,
+    color: Colors.muted,
+  },
   statGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: Spacing.md,
   },
   statCard: {
-    // Mababang basis para kasya pa rin ang gap sa makikitid na screen,
-    // tapos flexGrow ang bahalang punuin ang natirang espasyo.
     flexBasis: '46%',
     flexGrow: 1,
     padding: Spacing.lg,
@@ -429,5 +528,15 @@ const styles = StyleSheet.create({
     marginTop: 2,
     fontSize: FontSize.xs,
     color: Colors.muted,
+  },
+  empty: {
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.xxl,
+  },
+  emptyText: {
+    fontSize: FontSize.sm,
+    color: Colors.muted,
+    textAlign: 'center',
   },
 });

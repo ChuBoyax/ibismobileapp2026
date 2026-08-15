@@ -112,6 +112,34 @@ export async function me() {
   return request<{ user: ApiUser }>('/me', { token });
 }
 
+export type Stat = {
+  total: number;
+  new_this_month: number;
+};
+
+export type ActivityItem = {
+  type: 'resident' | 'household' | 'document';
+  title: string;
+  subtitle: string;
+  at: string;
+};
+
+export type DashboardData = {
+  barangays: string[];
+  stats: {
+    residents: Stat;
+    families: Stat;
+    households: Stat;
+    pending_documents: Stat;
+  };
+  activity: ActivityItem[];
+};
+
+export async function dashboard() {
+  const token = await getToken();
+  return request<DashboardData>('/dashboard', { token });
+}
+
 /** Binubura ang token sa server. Hindi nagpapasabog kapag nabigo. */
 export async function logout() {
   try {
