@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useCallback, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 
+import { TAB_BAR_HEIGHT } from '@/components/animated-tab-bar';
 import { ScreenHeader } from '@/components/screen-header';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '@/constants/theme';
 import { logout as apiLogout } from '@/lib/api';
@@ -289,7 +290,8 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: Spacing.xl,
-    paddingBottom: Spacing.xxl,
+    // Puwang para sa lumulutang na tab bar.
+    paddingBottom: Spacing.xxl + TAB_BAR_HEIGHT,
   },
   profileCard: {
     flexDirection: 'row',

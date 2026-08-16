@@ -5,12 +5,28 @@ import { getToken } from '@/lib/auth-storage';
 /**
  * Kliyente ng IBIS backend (/api/ibis/*).
  *
- * Nasa app.json ang base URL (expo.extra.apiBaseUrl). Palitan mo lang doon
- * kapag nagbago ang IP ng laptop mo o kapag nasa totoong server na.
+ * Nasa app.json ang base URL (expo.extra.apiBaseUrl) — iyon ang ginagamit sa
+ * totoong build. Sa development, ang IP ng laptop ang madalas magpalit (bagong
+ * DHCP lease, ibang WiFi), at tuwing mangyayari iyon ay tumitigil ang app kahit
+ * walang nabago sa code. Dahil sa iisang makina tumatakbo ang Metro at ang
+ * Laravel, ang host ng Metro na mismo ang pinagkukunan ng API host kapag naka-
+ * dev — kaya sumasabay ito sa bawat palit ng IP nang walang inaayos.
  */
 
+const DEV_API_PORT = 8000;
+
+/** Hinahango ang host mula sa `hostUri` ng Metro, hal. "192.168.0.103:8081". */
+function apiHostFromMetro(): string | null {
+  const hostUri = Constants.expoConfig?.hostUri ?? Constants.expoGoConfig?.debuggerHost;
+  const host = hostUri?.split(':')[0];
+
+  return host ? `http://${host}:${DEV_API_PORT}` : null;
+}
+
 const BASE_URL: string =
-  (Constants.expoConfig?.extra?.apiBaseUrl as string | undefined) ?? 'http://127.0.0.1:8000';
+  (__DEV__ ? apiHostFromMetro() : null) ??
+  (Constants.expoConfig?.extra?.apiBaseUrl as string | undefined) ??
+  'http://127.0.0.1:8000';
 
 /** Ilang segundo bago sumuko ang request. */
 const TIMEOUT_MS = 15000;
@@ -58,10 +74,12 @@ async function request<T>(
       signal: controller.signal,
       headers: {
         Accept: 'application/json',
-        ...(body ? { 'Content-Type': 'application/json' } : {}),
+        // Ang FormData lang ang nakakaalam ng sariling boundary nito, kaya
+        // hinahayaang ito ang magtakda ng Content-Type kapag may kalakip na file.
+        ...(body && !(body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: body ? JSON.stringify(body) : undefined,
+      body: body instanceof FormData ? body : body ? JSON.stringify(body) : undefined,
     });
   } catch (error) {
     // Abort, walang WiFi, maling IP, o patay ang server — pare-parehong
@@ -124,3 +142,185 @@ export async function logout() {
 
 /** Para maipakita sa Settings kung saan nakakabit ang app. */
 export const apiBaseUrl = BASE_URL;
+
+/* ── Registration ───────────────────────────────────────────────────── */
+
+/** Isang option na galing sa `options` na talahanayan ng RBI. */
+export type ApiOption = {
+  id: number;
+  name: string;
+};
+
+/** Naka-grupo ayon sa kategorya, hal. `civil_status`, `blood_type`. */
+export type OptionGroups = Record<string, ApiOption[]>;
+
+export type Paginated<T> = {
+  data: T[];
+  meta: {
+    current_page: number;
+    last_page: number;
+    per_page: number;
+    total: number;
+  };
+};
+
+export type ResidentSummary = {
+  id: number;
+  uuid: string | null;
+  full_name: string;
+  sex: string | null;
+  age: number | null;
+  civil_status: string | null;
+  purok: string | null;
+  contact_number: string | null;
+  is_4ps_member: boolean;
+  pwd: boolean;
+  senior: boolean;
+  solo_parent: boolean;
+  osy: boolean;
+};
+
+export type HouseholdSummary = {
+  id: number;
+  uuid: string | null;
+  house_number: string | null;
+  house_type: string | null;
+  ownership_type: string | null;
+  number_of_residents: number | null;
+  residents_count: number;
+  has_business: boolean;
+  business_name: string | null;
+};
+
+export type FamilySummary = {
+  id: number;
+  uuid: string | null;
+  family_name: string | null;
+  head_name: string | null;
+  family_type: string | null;
+  income_level: string | null;
+  members_count: number;
+};
+
+/** Anumang payload ng registration form, kasama ang mga naka-nest na tala. */
+export type RecordPayload = Record<string, unknown>;
+
+/** Larawang galing sa camera o gallery — file:// ang anyo ng URI nito. */
+const isLocalFile = (value: unknown): value is string =>
+  typeof value === 'string' && /^(file|content):\/\//.test(value);
+
+/**
+ * Pinapatag ang payload tungo sa FormData.
+ *
+ * Kailangan ito kapag may larawan: hindi kayang magdala ng file ang JSON.
+ * Sinusunod ang bracket na paraan ng Laravel (`educations[0][school_id]`)
+ * para makilala pa rin nito ang mga naka-nest na tala at array.
+ */
+function appendTo(form: FormData, key: string, value: unknown): void {
+  if (value === null || value === undefined) return;
+
+  if (isLocalFile(value)) {
+    const name = value.split('/').pop() || 'photo.jpg';
+    const extension = name.split('.').pop()?.toLowerCase();
+
+    form.append(key, {
+      uri: value,
+      name,
+      type: extension === 'png' ? 'image/png' : 'image/jpeg',
+    } as unknown as Blob);
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => {
+      if (item !== null && typeof item === 'object') {
+        for (const [k, v] of Object.entries(item as Record<string, unknown>)) {
+          appendTo(form, `${key}[${index}][${k}]`, v);
+        }
+      } else {
+        appendTo(form, `${key}[]`, item);
+      }
+    });
+    return;
+  }
+
+  if (typeof value === 'boolean') {
+    form.append(key, value ? '1' : '0');
+    return;
+  }
+
+  form.append(key, String(value));
+}
+
+function toFormData(payload: RecordPayload): FormData {
+  const form = new FormData();
+
+  for (const [key, value] of Object.entries(payload)) {
+    appendTo(form, key, value);
+  }
+
+  return form;
+}
+
+/** May kasamang larawan ang payload, kahit nasa loob ng repeater. */
+function hasFiles(value: unknown): boolean {
+  if (isLocalFile(value)) return true;
+  if (Array.isArray(value)) return value.some(hasFiles);
+  if (value !== null && typeof value === 'object') {
+    return Object.values(value as Record<string, unknown>).some(hasFiles);
+  }
+
+  return false;
+}
+
+async function authed<T>(path: string, options: { method?: string; body?: unknown } = {}) {
+  const token = await getToken();
+  return request<T>(path, { ...options, token });
+}
+
+/** Laman ng lahat ng dropdown. Isang tawag lang sa pagbukas ng form. */
+export async function fetchOptions() {
+  return authed<{ barangay_id: number; options: OptionGroups }>('/options');
+}
+
+function listQuery(params: { search?: string; perPage?: number } = {}) {
+  const query = new URLSearchParams();
+  if (params.search?.trim()) query.set('search', params.search.trim());
+  if (params.perPage) query.set('per_page', String(params.perPage));
+
+  const suffix = query.toString();
+  return suffix ? `?${suffix}` : '';
+}
+
+export function listResidents(params?: { search?: string; perPage?: number }) {
+  return authed<Paginated<ResidentSummary>>(`/residents${listQuery(params)}`);
+}
+
+export function listHouseholds(params?: { search?: string; perPage?: number }) {
+  return authed<Paginated<HouseholdSummary>>(`/households${listQuery(params)}`);
+}
+
+export function listFamilies(params?: { search?: string; perPage?: number }) {
+  return authed<Paginated<FamilySummary>>(`/families${listQuery(params)}`);
+}
+
+export function createResident(payload: RecordPayload) {
+  return authed<{ data: { id: number }; message: string }>('/residents', {
+    method: 'POST',
+    body: hasFiles(payload) ? toFormData(payload) : payload,
+  });
+}
+
+export function createHousehold(payload: RecordPayload) {
+  return authed<{ data: { id: number }; message: string }>('/households', {
+    method: 'POST',
+    body: hasFiles(payload) ? toFormData(payload) : payload,
+  });
+}
+
+export function createFamily(payload: RecordPayload) {
+  return authed<{ data: { id: number }; message: string }>('/families', {
+    method: 'POST',
+    body: hasFiles(payload) ? toFormData(payload) : payload,
+  });
+}

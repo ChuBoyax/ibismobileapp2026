@@ -42,7 +42,7 @@
       "reactCompiler": true
     },
     "extra": {
-      "apiBaseUrl": "http://192.168.100.166:8000"
+      "apiBaseUrl": "http://192.168.0.103:8000"
     }
   }
 }
