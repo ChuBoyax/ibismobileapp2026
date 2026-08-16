@@ -1,7 +1,14 @@
-import { ApiError, createFamily, createHousehold, createResident } from '@/lib/api';
+import {
+  ApiError,
+  createFamily,
+  createHousehold,
+  createResident,
+  payloadHasFiles,
+  serverReachable,
+} from '@/lib/api';
 import { isDeviceOnline } from '@/lib/connectivity';
 import { enqueue, type OutboxType } from '@/lib/outbox';
-import { drain } from '@/lib/sync';
+import { drain, refresh } from '@/lib/sync';
 
 /**
  * Iisang paraan ng pag-save para sa tatlong registration form.
@@ -26,8 +33,12 @@ const CREATE = {
 export type SaveResult =
   /** Naipadala na sa server. */
   | { queued: false }
-  /** Nakatabi muna sa cellphone — ipapadala kapag may koneksyon. */
-  | { queued: true };
+  /**
+   * Nakatabi muna sa cellphone — ipapadala kapag may koneksyon.
+   * Dala ang dahilan kung bakit hindi ito naipadala agad, para makita agad
+   * ng user habang nasa harap pa niya ang form.
+   */
+  | { queued: true; reason: string };
 
 export async function saveRecord(input: {
   type: OutboxType;
@@ -41,8 +52,16 @@ export async function saveRecord(input: {
   // labinlimang segundong "Saving…" bago pa man mapunta sa pila, gayong
   // alam naman natin sa simula pa lang na mabibigo iyon.
   if (!(await isDeviceOnline())) {
-    await queue(input);
-    return { queued: true };
+    await queue(input, 'No internet connection.');
+    return { queued: true, reason: 'No internet connection.' };
+  }
+
+  // May larawan: matagal ang upload nito, kaya tiyakin muna sa loob ng tatlong
+  // segundo na may sasagot. Kung wala, huwag nang simulan — animnapung
+  // segundong paghihintay iyon bago pa man mapunta sa pila.
+  if (payloadHasFiles(input.payload) && !(await serverReachable())) {
+    await queue(input, 'The server did not respond.');
+    return { queued: true, reason: 'The server did not respond.' };
   }
 
   try {
@@ -59,28 +78,44 @@ export async function saveRecord(input: {
     if (status === 401) throw error;
 
     // Hindi maabot ang server (0) o problema sa server (5xx) — itabi.
-    await queue(input);
+    await queue(input, error instanceof Error ? error.message : 'Could not send the record.');
 
     // Kung sakaling bumalik agad ang signal, hindi na maghihintay ng
     // reconnect event — pero walang halaga kung mabibigo rin.
     void drain();
 
-    return { queued: true };
+    return {
+      queued: true,
+      reason: error instanceof Error ? error.message : 'Could not send the record.',
+    };
   }
 }
 
-async function queue(input: {
-  type: OutboxType;
-  uuid: string;
-  label?: string | null;
-  payload: Record<string, unknown>;
-  formValues: Record<string, unknown>;
-}) {
+async function queue(
+  input: {
+    type: OutboxType;
+    uuid: string;
+    label?: string | null;
+    payload: Record<string, unknown>;
+    formValues: Record<string, unknown>;
+  },
+  reason?: string
+) {
   await enqueue({
     uuid: input.uuid,
     type: input.type,
     label: input.label ?? null,
     payload: { ...input.payload, uuid: input.uuid },
     formValues: input.formValues,
+    reason,
   });
+
+  // NANDITO ANG ABISO, HINDI SA TUMATAWAG.
+  //
+  // Tatlo ang daan papunta sa pila — walang internet, walang sumagot na
+  // server, at nabigong padala. Dati ay isa lang sa kanila ang nagpapaalam sa
+  // dashboard, kaya nananatiling zero ang bilang sa pill at mukhang walang
+  // naghihintay gayong may naitabi naman. Sa paglalagay nito rito, sakop na
+  // ang lahat ng daan — pati ang idadagdag pa mamaya.
+  await refresh();
 }
