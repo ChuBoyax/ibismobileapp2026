@@ -111,4 +111,5 @@ export const CacheKey = {
   dashboard: 'dashboard',
   notifications: 'notifications',
   dismissedNotifications: 'notifications.dismissed',
+  reports: 'reports',
 } as const;

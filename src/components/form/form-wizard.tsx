@@ -1,6 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
-import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -22,6 +21,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Colors, FontSize, Radius, Shadow, Spacing } from '@/constants/theme';
+import { goBack } from '@/lib/navigation';
 
 import { FormSection } from './form-section';
 import {
@@ -59,7 +59,6 @@ export function FormWizard({
   successMessage,
   onSubmit,
 }: FormWizardProps) {
-  const router = useRouter();
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
 
@@ -130,7 +129,7 @@ export function FormWizard({
 
   const handleBack = () => {
     if (stepIndex === 0) {
-      router.back();
+      goBack();
       return;
     }
     goTo(stepIndex - 1);
@@ -269,7 +268,7 @@ export function FormWizard({
         message={successMessage}
         onDone={() => {
           setSaved(false);
-          router.back();
+          goBack();
         }}
       />
     </View>

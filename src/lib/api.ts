@@ -166,6 +166,71 @@ export async function dashboard() {
   return request<DashboardData>('/dashboard', { token });
 }
 
+// ── Reports ─────────────────────────────────────────────────────────────
+
+export type ReportSlice = {
+  label: string;
+  value: number;
+  percent?: number;
+};
+
+export type ReportFilters = {
+  barangay_id?: number | null;
+  purok_id?: number | null;
+  sex?: string | null;
+  age_group?: string | null;
+};
+
+export type ReportData = {
+  generated_at: string;
+  barangays: string[];
+  filters: {
+    barangays: { id: number; label: string }[];
+    puroks: { id: number; label: string }[];
+    sexes: string[];
+    age_groups: { key: string; label: string }[];
+  };
+  applied: Required<ReportFilters>;
+  /** True kapag may filter na nagpapaliit ng bilang ng residente. */
+  narrowed: boolean;
+  population: {
+    total: number;
+    average_age: number | null;
+    sex: ReportSlice[];
+    age_groups: ReportSlice[];
+    civil_status: ReportSlice[];
+    purok: ReportSlice[];
+    voters: { registered: number; voting_age: number; percent: number };
+    registry_status: ReportSlice[];
+  };
+  sectors: ReportSlice[];
+  households: {
+    total: number;
+    average_size: number | null;
+    utilities: ReportSlice[];
+    ownership: ReportSlice[];
+    house_type: ReportSlice[];
+  };
+  families: {
+    total: number;
+    income_levels: ReportSlice[];
+    types: ReportSlice[];
+  };
+};
+
+export async function reports(filters: ReportFilters = {}) {
+  const token = await getToken();
+
+  // Ang walang laman ay hindi ipinapadala — mas malinis ang URL at mas
+  // madaling basahin sa server log kung ano talaga ang sinala.
+  const query = Object.entries(filters)
+    .filter(([, value]) => value !== null && value !== undefined && value !== '')
+    .map(([key, value]) => `${key}=${encodeURIComponent(String(value))}`)
+    .join('&');
+
+  return request<ReportData>(`/reports${query ? `?${query}` : ''}`, { token });
+}
+
 // ── Notifications ───────────────────────────────────────────────────────
 
 export type Notification = {
