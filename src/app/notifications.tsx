@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router, useFocusEffect } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useRef, useState } from 'react';
 import {
@@ -12,10 +12,12 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { RequireAuth } from '@/components/require-auth';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '@/constants/theme';
 import { ApiError, notifications, type Notification } from '@/lib/api';
 import { CacheKey, getCache, putCache } from '@/lib/db';
 import { relativeTime } from '@/lib/format';
+import { goBack } from '@/lib/navigation';
 import { handleAuthError } from '@/lib/session';
 
 /**
@@ -42,7 +44,16 @@ const LEVEL: Record<Notification['level'], { icon: IoniconName; tint: string; co
   success: { icon: 'checkmark-circle', tint: Colors.infoLight, color: Colors.info },
 };
 
-export default function NotificationsScreen() {
+/** Kailangan ng token — walang laman ang screen na ito kung hindi naka-login. */
+export default function GuardedNotificationsScreen() {
+  return (
+    <RequireAuth>
+      <NotificationsScreen />
+    </RequireAuth>
+  );
+}
+
+function NotificationsScreen() {
   const insets = useSafeAreaInsets();
 
   const [items, setItems] = useState<Notification[]>([]);
@@ -131,7 +142,7 @@ export default function NotificationsScreen() {
         <View style={styles.headerRow}>
           <Pressable
             style={({ pressed }) => [styles.back, pressed && styles.backPressed]}
-            onPress={() => router.back()}
+            onPress={() => goBack()}
             accessibilityRole="button"
             accessibilityLabel="Go back">
             <Ionicons name="chevron-back" size={22} color={Colors.onPrimary} />

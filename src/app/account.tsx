@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router, useFocusEffect } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useRef, useState } from 'react';
 import {
@@ -16,6 +16,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { TextField } from '@/components/text-field';
+import { RequireAuth } from '@/components/require-auth';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '@/constants/theme';
 import {
   account as fetchAccount,
@@ -25,11 +26,21 @@ import {
   type Account,
 } from '@/lib/api';
 import { saveEmail, saveProfile } from '@/lib/auth-storage';
+import { goBack } from '@/lib/navigation';
 import { handleAuthError } from '@/lib/session';
 
 type Mode = 'view' | 'edit' | 'password';
 
-export default function AccountScreen() {
+/** Kailangan ng token — walang laman ang screen na ito kung hindi naka-login. */
+export default function GuardedAccountScreen() {
+  return (
+    <RequireAuth>
+      <AccountScreen />
+    </RequireAuth>
+  );
+}
+
+function AccountScreen() {
   const insets = useSafeAreaInsets();
 
   const [data, setData] = useState<Account | null>(null);
@@ -164,7 +175,7 @@ export default function AccountScreen() {
         <View style={styles.headerRow}>
           <Pressable
             style={({ pressed }) => [styles.back, pressed && styles.pressed]}
-            onPress={() => (mode === 'view' ? router.back() : cancel())}
+            onPress={() => (mode === 'view' ? goBack() : cancel())}
             accessibilityRole="button"
             accessibilityLabel="Go back">
             <Ionicons name="chevron-back" size={22} color={Colors.onPrimary} />

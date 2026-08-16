@@ -20,19 +20,13 @@ export default function RootLayout() {
             gestureEnabled: true,
           }}>
           {/* Mula sa ibaba ang mga registration form — nagpapahiwatig na
-              pansamantalang gawain sila at hindi bagong lalim sa nabigasyon. */}
-          <Stack.Screen
-            name="registration/resident"
-            options={{ animation: 'slide_from_bottom' }}
-          />
-          <Stack.Screen
-            name="registration/household"
-            options={{ animation: 'slide_from_bottom' }}
-          />
-          <Stack.Screen
-            name="registration/family"
-            options={{ animation: 'slide_from_bottom' }}
-          />
+              pansamantalang gawain sila at hindi bagong lalim sa nabigasyon.
+
+              Iisang screen lang ito sa paningin ng Stack na ito: may sariling
+              _layout ang registration/ (doon nakalagay ang auth guard), kaya
+              isang nested navigator na ito. Ang pagtukoy sa bawat form nang
+              tig-isa ay maghahanap ng route na wala sa antas na ito. */}
+          <Stack.Screen name="registration" options={{ animation: 'slide_from_bottom' }} />
         </Stack>
       </SafeAreaProvider>
     </GestureHandlerRootView>

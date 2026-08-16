@@ -1,10 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Colors, FontSize, Radius, Spacing } from '@/constants/theme';
+import { goBack } from '@/lib/navigation';
 
 type FormGateProps = {
   title: string;
@@ -22,7 +22,6 @@ type FormGateProps = {
  * na maling datos kaysa maghintay ng ilang segundo.
  */
 export function FormGate({ title, loading, error, onRetry, children }: FormGateProps) {
-  const router = useRouter();
   const insets = useSafeAreaInsets();
 
   if (!loading && !error) return <>{children}</>;
@@ -34,7 +33,7 @@ export function FormGate({ title, loading, error, onRetry, children }: FormGateP
       <View style={[styles.header, { paddingTop: insets.top + Spacing.md }]}>
         <Pressable
           style={styles.headerButton}
-          onPress={() => router.back()}
+          onPress={() => goBack()}
           hitSlop={8}
           accessibilityRole="button"
           accessibilityLabel="Go back">
