@@ -1,4 +1,5 @@
 import Constants from 'expo-constants';
+import { File } from 'expo-file-system';
 
 import { getToken } from '@/lib/auth-storage';
 
@@ -88,15 +89,22 @@ async function request<T>(
       body: body instanceof FormData ? body : body ? JSON.stringify(body) : undefined,
     });
   } catch (error) {
-    // Abort, walang WiFi, maling IP, o patay ang server — pare-parehong
-    // walang naabot na server, kaya iisang mensahe.
     const aborted = error instanceof Error && error.name === 'AbortError';
-    throw new ApiError(
-      aborted
-        ? 'The server took too long to respond. Please try again.'
-        : 'Cannot reach the server. Check your connection and try again.',
-      0
-    );
+
+    if (aborted) {
+      throw new ApiError('The server took too long to respond. Please try again.', 0);
+    }
+
+    // ISINASAMA ANG TUNAY NA DAHILAN, hindi lang "walang koneksyon".
+    //
+    // Ang bawat pagkabigo ng fetch ay dating iisa ang mensahe. Pero hindi
+    // pare-pareho ang dahilan: may walang signal, may maling IP, at may
+    // hindi mabasang file na kalakip. Ang huli ay bumabagsak AGAD — at
+    // kapag "walang koneksyon" ang sinasabi, hahabulin ng user ang signal
+    // habang ang file pala ang problema.
+    const detail = error instanceof Error && error.message ? ` — ${error.message}` : '';
+
+    throw new ApiError(`Cannot reach the server${detail}`, 0);
   } finally {
     clearTimeout(timer);
   }
@@ -138,6 +146,32 @@ export function login(email: string, password: string) {
 export async function me() {
   const token = await getToken();
   return request<{ user: ApiUser }>('/me', { token });
+}
+
+/**
+ * Sumasagot ba ang server? Maikling tanong, maikling hintay.
+ *
+ * Ginagamit bago ang mabagal na pag-upload ng larawan. Kung wala nito, ang
+ * pag-save habang patay ang server ay maghihintay ng buong timeout ng upload —
+ * animnapung segundo ng "Saving…" bago pa man mapunta sa pila, gayong tatlong
+ * segundo lang ang kailangan para malaman na walang sasagot.
+ *
+ * Kahit 401 ang isagot, abot pa rin ang server — ang mahalaga ay may sumagot.
+ */
+export async function serverReachable(): Promise<boolean> {
+  const token = await getToken();
+
+  try {
+    await request('/me', { token, timeout: 3000 });
+    return true;
+  } catch (error) {
+    return !(error instanceof ApiError && error.status === 0);
+  }
+}
+
+/** Totoo kapag may larawan ang payload — mas matagal ang padala nito. */
+export function payloadHasFiles(payload: RecordPayload): boolean {
+  return hasFiles(payload);
 }
 
 export type Stat = {
@@ -389,13 +423,26 @@ function appendTo(form: FormData, key: string, value: unknown): void {
   if (value === null || value === undefined) return;
 
   if (isLocalFile(value)) {
-    const name = value.split('/').pop() || 'photo.jpg';
+    const name = value.split('/').pop()?.split('?')[0] || 'photo.jpg';
     const extension = name.split('.').pop()?.toLowerCase();
 
+    // ANG LUMANG ANYO NA { uri, name, type } AY HINDI NA TANGGAP.
+    //
+    // Simula SDK 54, sariling fetch na ang Expo — hindi na ang sa React
+    // Native. Tatlo lang ang tinatanggap nito: string, Blob, o bagay na may
+    // bytes(). Ang lumang paraan ay nagpapabagsak agad ng pagpapadala bago pa
+    // ito umalis, at ang lumalabas ay "Unsupported FormDataPart
+    // implementation" — na madaling mapagkamalang problema sa koneksyon.
+    //
+    // Ibinibigay pa rin ang `name`: batay doon ng PHP kung file ba ito o
+    // ordinaryong field. Kung wala, hindi makikita ng $request->hasFile()
+    // ang larawan at tahimik itong mawawala.
+    const file = new File(value);
+
     form.append(key, {
-      uri: value,
       name,
-      type: extension === 'png' ? 'image/png' : 'image/jpeg',
+      type: file.type ?? (extension === 'png' ? 'image/png' : 'image/jpeg'),
+      bytes: () => file.bytes(),
     } as unknown as Blob);
     return;
   }
@@ -477,36 +524,52 @@ export function listFamilies(params?: { search?: string; perPage?: number }) {
 }
 
 /**
- * Gaano katagal hihintayin ang pag-save bago ito ilagay sa pila.
+ * Gaano katagal hihintayin ang pag-save.
  *
- * Mas maikli kaysa sa karaniwan, at LIGTAS ITONG PAIKLIIN: idempotent ang
- * server sa uuid. Kung sakaling nakapasok pala ang tala at natimeout lang
- * tayo, ang muling pagpapadala ay sasagutin ng "already recorded" — walang
- * madodobleng residente. Kaya mas mabuting isuko agad at ipadala sa likod
- * kaysa panoorin ng user ang "Saving…" nang labinlimang segundo.
+ * PURONG TEKSTO — maikli. Ligtas itong paikliin dahil idempotent ang server
+ * sa uuid: kung nakapasok pala ang tala at natimeout lang tayo, ang muling
+ * pagpapadala ay sasagutin ng "already recorded". Mas mabuting isuko agad at
+ * ipadala sa likod kaysa panoorin ng user ang "Saving…".
+ *
+ * MAY LARAWAN — mahaba. Ang pag-upload ng litrato ay hindi kasingbilis ng
+ * pagpapadala ng ilang linya ng teksto; sa mahinang signal, umaabot ito ng
+ * kalahating minuto. Kung paiikliin din ito, HINDI KAILANMAN MAIPAPADALA ANG
+ * TALANG MAY LARAWAN — mabibigo ito sa pag-save at mabibigo ulit sa bawat
+ * pagsubok ng sync, magpakailanman.
  */
-const CREATE_TIMEOUT_MS = 8000;
+const TEXT_TIMEOUT_MS = 8000;
+const UPLOAD_TIMEOUT_MS = 60_000;
 
-export function createResident(payload: RecordPayload) {
-  return authed<{ data: { id: number }; message: string }>('/residents', {
+function createOptions(payload: RecordPayload, timeout?: number) {
+  const files = hasFiles(payload);
+
+  return {
     method: 'POST',
-    body: hasFiles(payload) ? toFormData(payload) : payload,
-    timeout: CREATE_TIMEOUT_MS,
-  });
+    body: files ? toFormData(payload) : payload,
+    timeout: timeout ?? (files ? UPLOAD_TIMEOUT_MS : TEXT_TIMEOUT_MS),
+  };
 }
 
-export function createHousehold(payload: RecordPayload) {
-  return authed<{ data: { id: number }; message: string }>('/households', {
-    method: 'POST',
-    body: hasFiles(payload) ? toFormData(payload) : payload,
-    timeout: CREATE_TIMEOUT_MS,
-  });
+/** Ang pagpapadala mula sa pila ay walang nanonood, kaya pwedeng maghintay. */
+export type CreateOptions = { timeout?: number };
+
+export function createResident(payload: RecordPayload, options: CreateOptions = {}) {
+  return authed<{ data: { id: number }; message: string }>(
+    '/residents',
+    createOptions(payload, options.timeout)
+  );
 }
 
-export function createFamily(payload: RecordPayload) {
-  return authed<{ data: { id: number }; message: string }>('/families', {
-    method: 'POST',
-    body: hasFiles(payload) ? toFormData(payload) : payload,
-    timeout: CREATE_TIMEOUT_MS,
-  });
+export function createHousehold(payload: RecordPayload, options: CreateOptions = {}) {
+  return authed<{ data: { id: number }; message: string }>(
+    '/households',
+    createOptions(payload, options.timeout)
+  );
+}
+
+export function createFamily(payload: RecordPayload, options: CreateOptions = {}) {
+  return authed<{ data: { id: number }; message: string }>(
+    '/families',
+    createOptions(payload, options.timeout)
+  );
 }

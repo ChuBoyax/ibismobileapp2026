@@ -3,7 +3,15 @@ import { AppState } from 'react-native';
 
 import { ApiError, createFamily, createHousehold, createResident } from '@/lib/api';
 import { isDeviceOnline } from '@/lib/connectivity';
-import { counts, pending, remove, setStatus, type OutboxCounts, type OutboxType } from '@/lib/outbox';
+import {
+  counts,
+  missingPhotos,
+  pending,
+  remove,
+  setStatus,
+  type OutboxCounts,
+  type OutboxType,
+} from '@/lib/outbox';
 
 /**
  * Sync engine — inihahatid ang mga naka-queue na tala kapag may koneksyon.
@@ -21,11 +29,24 @@ import { counts, pending, remove, setStatus, type OutboxCounts, type OutboxType 
  * mahinang signal ay maaaring itapon nang wala sa panahon.
  */
 
-const CREATE: Record<OutboxType, (payload: Record<string, unknown>) => Promise<unknown>> = {
+const CREATE: Record<
+  OutboxType,
+  (payload: Record<string, unknown>, options?: { timeout?: number }) => Promise<unknown>
+> = {
   resident: createResident,
   household: createHousehold,
   family: createFamily,
 };
+
+/**
+ * Mahaba ang hinihintay ng pila — walang nanonood dito.
+ *
+ * Sa pag-save, mabilis tayong sumusuko para hindi maghintay ang user. Dito,
+ * kabaligtaran ang tama: ang layunin ay makarating talaga ang tala, gaano man
+ * kabagal ang signal. Kung paiikliin din ito, ang talang may larawan ay
+ * mabibigo sa bawat pagsubok at hindi kailanman maipapadala.
+ */
+const SYNC_TIMEOUT_MS = 120_000;
 
 /** Hanggang ilang subok bago tumigil sa pansamantalang pagkabigo. */
 const MAX_ATTEMPTS = 8;
@@ -124,11 +145,28 @@ export async function drain(): Promise<void> {
         continue;
       }
 
+      // Tsek bago ipadala: nariyan pa ba ang larawan?
+      //
+      // Kapag wala, babagsak ang pagpapadala sa antas ng network at ang
+      // ipapakita ay "Cannot reach the server" — na magtutulak sa user na
+      // habulin ang signal gayong ang file pala ang nawawala. Wala ring
+      // darating na request sa backend, kaya walang makikita sa logs.
+      const missing = missingPhotos(item.payload);
+
+      if (missing.length > 0) {
+        await setStatus(item.uuid, 'needs_fix', {
+          error:
+            `The photo is no longer on this device (${missing.length} file` +
+            `${missing.length === 1 ? '' : 's'} missing). Tap Fix to attach it again.`,
+        });
+        continue;
+      }
+
       await setStatus(item.uuid, 'syncing');
       await publish();
 
       try {
-        await CREATE[item.type](item.payload);
+        await CREATE[item.type](item.payload, { timeout: SYNC_TIMEOUT_MS });
 
         // Tagumpay — kasama ang kaso ng "naipadala na dati", dahil 200 rin
         // ang isinasagot ng server doon.

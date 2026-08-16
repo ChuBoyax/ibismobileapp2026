@@ -9,9 +9,8 @@ import { saveRecord } from '@/features/registration/save-record';
 import { useDraft } from '@/features/registration/use-draft';
 import { useFormSources } from '@/features/registration/use-form-sources';
 
-const SAVED = 'Naitala na ang residente sa RBI. Makikita na ito sa listahan at sa web.';
-const QUEUED =
-  'Nakatabi na ang residente sa cellphone mo. Kusa itong ipapadala kapag may koneksyon — hindi mo na kailangang ulitin.';
+const SAVED = 'The resident is now in the barangay registry.';
+const QUEUED = 'Saved on this device. It will be sent automatically once you are back online.';
 
 export default function NewResidentScreen() {
   const { sources, loading, error, reload } = useFormSources({
@@ -35,6 +34,8 @@ export default function NewResidentScreen() {
       formValues: values,
     });
 
+    // Ang teknikal na dahilan ay nasa Sync queue — hindi dito. Ang kailangan
+    // lang malaman ng user sa sandaling ito ay ligtas ang tala niya.
     setMessage(result.queued ? QUEUED : SAVED);
   }
 

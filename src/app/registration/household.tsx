@@ -9,9 +9,8 @@ import { saveRecord } from '@/features/registration/save-record';
 import { useDraft } from '@/features/registration/use-draft';
 import { useFormSources } from '@/features/registration/use-form-sources';
 
-const SAVED = 'Naitala na ang sambahayan sa RBI. Makikita na ito sa listahan at sa web.';
-const QUEUED =
-  'Nakatabi na ang sambahayan sa cellphone mo. Kusa itong ipapadala kapag may koneksyon — hindi mo na kailangang ulitin.';
+const SAVED = 'The household is now in the barangay registry.';
+const QUEUED = 'Saved on this device. It will be sent automatically once you are back online.';
 
 export default function NewHouseholdScreen() {
   const { sources, loading, error, reload } = useFormSources();

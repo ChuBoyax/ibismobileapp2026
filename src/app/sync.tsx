@@ -214,7 +214,16 @@ function Row({
         {item.status === 'syncing' && <Ionicons name="sync" size={16} color={Colors.info} />}
       </View>
 
-      {broken && !!item.lastError && <Text style={styles.error}>{item.lastError}</Text>}
+      {/* Ipinapakita ang dahilan kahit hindi pa tuluyang nabigo. Kung
+          itatago ito hanggang sumuko, ang user na paulit-ulit nang sumasablay
+          ay walang makikitang pahiwatig kung bakit — at wala siyang masasabi
+          sa kahit sino kapag humingi siya ng tulong. */}
+      {!!item.lastError && (
+        <Text style={[styles.error, !broken && styles.warning]}>
+          {item.lastError}
+          {!broken && item.attempts > 0 ? `  (${item.attempts} tries)` : ''}
+        </Text>
+      )}
 
       <View style={styles.actions}>
         {!!onFix && (
@@ -354,6 +363,10 @@ const styles = StyleSheet.create({
     fontSize: FontSize.xs,
     color: Colors.danger,
     lineHeight: 17,
+  },
+  warning: {
+    backgroundColor: Colors.warningLight,
+    color: Colors.warning,
   },
   actions: {
     flexDirection: 'row',

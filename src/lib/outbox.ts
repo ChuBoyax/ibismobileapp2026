@@ -70,6 +70,8 @@ function outboxDirectory(uuid: string) {
 async function persistPhotos(uuid: string, payload: Record<string, unknown>) {
   let index = 0;
   let directoryReady = false;
+  /** Kung nabigo ang pagkopya, dala nito ang dahilan para makita ng user. */
+  let warning: string | null = null;
 
   function ensureDirectory() {
     if (directoryReady) return;
@@ -77,37 +79,65 @@ async function persistPhotos(uuid: string, payload: Record<string, unknown>) {
     directoryReady = true;
   }
 
-  function walk(value: unknown): unknown {
+  async function walk(value: unknown): Promise<unknown> {
     if (isLocalFile(value)) {
       try {
         ensureDirectory();
 
         const original = new File(value);
-        const extension = value.split('.').pop()?.split('?')[0] || 'jpg';
-        const copy = new File(outboxDirectory(uuid), `photo-${index++}.${extension}`);
+        const name = value.split('/').pop()?.split('?')[0] ?? '';
+        const extension = name.includes('.') ? name.split('.').pop() : 'jpg';
+        const copy = new File(outboxDirectory(uuid), `photo-${index++}.${extension || 'jpg'}`);
 
-        original.copy(copy);
+        // ASYNC ANG COPY — kailangan itong hintayin.
+        //
+        // Kung hindi, ibabalik natin ang URI ng file na hindi pa tapos
+        // kopyahin. Walang laman pa iyon pagdating ng oras ng pagpapadala,
+        // kaya tatanggihan ng server ang larawan at mababaon ang buong tala
+        // sa "needs fixing" — gayong walang naman talagang mali sa datos.
+        await original.copy(copy);
 
-        return copy.uri;
-      } catch {
+        // Katiyakan bago ipagpalit: kung sa anumang dahilan ay walang
+        // nabuong file, mas mabuti pang gamitin ang orihinal kaysa magturo
+        // sa wala.
+        if (copy.exists) return copy.uri;
+
+        warning = 'The photo could not be saved on this device. It may not be sent.';
+        return value;
+      } catch (error) {
         // Kung hindi makopya, mas mabuti pa ring ma-queue ang tala kasama ang
         // orihinal na URI kaysa mawala ang buong record dahil sa isang larawan.
+        // Pero ITINATALA ANG DAHILAN — ang tahimik na pagkabigo dito ay
+        // nagiging misteryosong 422 mamaya, at walang paraan para maunawaan.
+        warning = `Photo could not be copied: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`;
+
         return value;
       }
     }
 
-    if (Array.isArray(value)) return value.map(walk);
+    if (Array.isArray(value)) {
+      return Promise.all(value.map(walk));
+    }
 
     if (value !== null && typeof value === 'object') {
-      return Object.fromEntries(
-        Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, walk(item)])
+      const entries = await Promise.all(
+        Object.entries(value as Record<string, unknown>).map(
+          async ([key, item]) => [key, await walk(item)] as const
+        )
       );
+
+      return Object.fromEntries(entries);
     }
 
     return value;
   }
 
-  return walk(payload) as Record<string, unknown>;
+  return {
+    payload: (await walk(payload)) as Record<string, unknown>,
+    warning,
+  };
 }
 
 function removePhotos(uuid: string) {
@@ -142,23 +172,28 @@ export async function enqueue(input: {
   label?: string | null;
   payload: Record<string, unknown>;
   formValues: Record<string, unknown>;
+  /** Bakit hindi ito naipadala agad — para may makita ang user sa pila. */
+  reason?: string;
 }): Promise<void> {
   const db = await getDatabase();
   const now = Date.now();
 
-  const payload = await persistPhotos(input.uuid, input.payload);
+  const { payload, warning } = await persistPhotos(input.uuid, input.payload);
 
   // REPLACE para maging pag-update ito kapag inayos at ipinadala ulit ang
   // parehong tala — hindi bagong entry.
   await db.runAsync(
     `INSERT OR REPLACE INTO outbox
        (uuid, type, label, payload, form_values, status, attempts, last_error, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'pending', 0, NULL, COALESCE((SELECT created_at FROM outbox WHERE uuid = ?), ?), ?)`,
+     VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, COALESCE((SELECT created_at FROM outbox WHERE uuid = ?), ?), ?)`,
     input.uuid,
     input.type,
     input.label ?? null,
     JSON.stringify(payload),
     JSON.stringify(input.formValues),
+    // Ang babala sa larawan ang nauuna — mas tiyak iyon kaysa sa pangkalahatang
+    // dahilan ng pagkabigo ng pagpapadala.
+    warning ?? input.reason ?? null,
     input.uuid,
     now,
     now
@@ -187,6 +222,53 @@ export async function pending(): Promise<OutboxItem[]> {
   );
 
   return rows.map(toItem);
+}
+
+/**
+ * Nariyan pa ba ang lahat ng larawan ng talang ito?
+ *
+ * Tinatawag bago ipadala. Kapag wala na ang file, babagsak ang React Native
+ * sa antas ng network at ang lumalabas ay "Cannot reach the server" — malayo
+ * sa tunay na dahilan. Walang request na darating sa backend, kaya wala rin
+ * itong makikita sa logs at mukhang problema sa signal ang lahat.
+ *
+ * Mas mabuting sabihin nang tuwiran kung aling file ang nawawala.
+ */
+export function missingPhotos(payload: unknown): string[] {
+  const missing: string[] = [];
+
+  function walk(value: unknown) {
+    if (isLocalFile(value)) {
+      try {
+        const file = new File(value);
+
+        // Hindi sapat na umiiral ito. Ang file na walang laman ay hindi
+        // mababasa ng React Native at magpapabagsak ng pagpapadala bago pa
+        // ito umalis — kaya kailangang mahuli rin dito.
+        if (!file.exists) {
+          missing.push(`${value} (missing)`);
+        } else if (!file.size) {
+          missing.push(`${value} (empty)`);
+        }
+      } catch (error) {
+        missing.push(`${value} (${error instanceof Error ? error.message : 'unreadable'})`);
+      }
+      return;
+    }
+
+    if (Array.isArray(value)) {
+      value.forEach(walk);
+      return;
+    }
+
+    if (value !== null && typeof value === 'object') {
+      Object.values(value as Record<string, unknown>).forEach(walk);
+    }
+  }
+
+  walk(payload);
+
+  return missing;
 }
 
 export async function remove(uuid: string): Promise<void> {
