@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { TAB_BAR_HEIGHT } from '@/components/animated-tab-bar';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '@/constants/theme';
 import { ActivitySheet } from '@/components/activity-sheet';
 import {
@@ -358,7 +359,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scroll: {
-    paddingBottom: Spacing.xxl,
+    // Lumulutang ang tab bar sa ibabaw ng nilalaman, kaya kailangan ng
+    // sariling puwang para maabot pa rin ang dulo ng pahina.
+    paddingBottom: Spacing.xxl + TAB_BAR_HEIGHT,
   },
   header: {
     backgroundColor: Colors.primary,
