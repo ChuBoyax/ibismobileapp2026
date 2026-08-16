@@ -27,6 +27,87 @@ async function hashPin(pin: string, salt: string) {
   return Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${salt}:${pin}`);
 }
 
+// ── Offline na login ────────────────────────────────────────────────────
+
+const KEY_PASSWORD_HASH = 'ibis.password.hash';
+const KEY_PASSWORD_SALT = 'ibis.password.salt';
+
+/**
+ * Ilang beses inuulit ang hash.
+ *
+ * Ang isang beses na SAHA-256 ay mabilis subukan nang paulit-ulit — kung
+ * makuha ng iba ang laman ng storage, milyon-milyong hula kada segundo ang
+ * kaya niyang gawin. Sa pag-uulit, ang bawat hula ay nagiging kasing bagal ng
+ * isang tunay na login. Hindi ito nagpapahirap sa may-ari (isang beses lang
+ * naman), pero libong beses na mas mabagal para sa umaatake.
+ */
+const PASSWORD_ROUNDS = 1000;
+
+async function hashPassword(password: string, salt: string) {
+  let digest = `${salt}:${password}`;
+
+  for (let round = 0; round < PASSWORD_ROUNDS; round++) {
+    digest = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, digest);
+  }
+
+  return digest;
+}
+
+/**
+ * Itinatago ang patunay ng password para sa offline na login.
+ *
+ * HINDI ITINATAGO ANG MISMONG PASSWORD — hash lang na may sariling salt, at
+ * nasa expo-secure-store na naka-encrypt ng Android Keystore / iOS Keychain.
+ * Hindi ito maibabalik sa orihinal; ihahambing lang ang bagong hash dito.
+ */
+export async function savePasswordProof(password: string) {
+  const salt = Crypto.randomUUID();
+  const hash = await hashPassword(password, salt);
+
+  await SecureStore.setItemAsync(KEY_PASSWORD_SALT, salt);
+  await SecureStore.setItemAsync(KEY_PASSWORD_HASH, hash);
+}
+
+export async function hasPasswordProof() {
+  return (await SecureStore.getItemAsync(KEY_PASSWORD_HASH)) !== null;
+}
+
+const KEY_OFFLINE_SESSION = 'ibis.session.offline';
+
+/**
+ * Pumasok ang user gamit ang naka-save na patunay dahil hindi maabot ang server.
+ *
+ * Kailangan ito dahil walang token ang ganitong pagpasok — imposibleng
+ * makakuha ng token nang hindi nakakausap ang server. Ang bandilang ito ang
+ * nagsasabing may karapatan siyang makita ang naka-save na datos, kahit walang
+ * token. Kapag nakabalik ang koneksyon, tatanggihan ng server ang anumang
+ * hiling at doon siya papapasok muli sa tunay na login.
+ */
+export async function setOfflineSession(active: boolean) {
+  if (active) {
+    await SecureStore.setItemAsync(KEY_OFFLINE_SESSION, '1');
+    return;
+  }
+
+  await SecureStore.deleteItemAsync(KEY_OFFLINE_SESSION);
+}
+
+export async function isOfflineSession() {
+  return (await SecureStore.getItemAsync(KEY_OFFLINE_SESSION)) === '1';
+}
+
+/** Tama ba ang password, batay sa huling matagumpay na online na login? */
+export async function verifyPassword(password: string) {
+  const [salt, hash] = await Promise.all([
+    SecureStore.getItemAsync(KEY_PASSWORD_SALT),
+    SecureStore.getItemAsync(KEY_PASSWORD_HASH),
+  ]);
+
+  if (!salt || !hash) return false;
+
+  return (await hashPassword(password, salt)) === hash;
+}
+
 export async function hasPin() {
   const hash = await SecureStore.getItemAsync(KEY_PIN_HASH);
   return hash !== null;
@@ -111,11 +192,21 @@ export async function saveProfile(profile: unknown) {
   await SecureStore.setItemAsync(KEY_PROFILE, JSON.stringify(profile));
 }
 
-/** Tinatapos ang session: token at profile lang, hindi ang PIN. */
+/**
+ * Tinatapos ang session — ang TOKEN lang, hindi ang datos ng user.
+ *
+ * Sinasadyang NANANATILI ang profile: pag-aari iyon ng taong iyon, at siya
+ * rin ang malamang na babalik sa cellphone na ito. Kung buburahin, ang
+ * offline na pagpasok ay magiging walang kabuluhan — makakapasok ka nga, pero
+ * walang pangalan, walang barangay, walang maipapakita.
+ *
+ * Ang paglilinis ng datos ay may sariling sandali: kapag ibang tao na ang
+ * nag-login, o kapag tuluyan nang inalis ang seguridad sa device.
+ */
 export async function clearSession() {
   await Promise.all([
     SecureStore.deleteItemAsync(KEY_TOKEN),
-    SecureStore.deleteItemAsync(KEY_PROFILE),
+    SecureStore.deleteItemAsync(KEY_OFFLINE_SESSION),
   ]);
 }
 
@@ -129,5 +220,8 @@ export async function clearSecurity() {
     SecureStore.deleteItemAsync(KEY_ATTEMPTS),
     SecureStore.deleteItemAsync(KEY_TOKEN),
     SecureStore.deleteItemAsync(KEY_PROFILE),
+    SecureStore.deleteItemAsync(KEY_PASSWORD_HASH),
+    SecureStore.deleteItemAsync(KEY_PASSWORD_SALT),
+    SecureStore.deleteItemAsync(KEY_OFFLINE_SESSION),
   ]);
 }

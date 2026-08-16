@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, Image, StyleSheet, View } from 'react-native';
 
 import { Colors, Radius, Spacing } from '@/constants/theme';
-import { getToken } from '@/lib/auth-storage';
+import { getToken, isOfflineSession } from '@/lib/auth-storage';
 
 type State = 'checking' | 'allowed' | 'denied';
 
@@ -26,9 +26,13 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let active = true;
 
-    getToken()
-      .then((token) => {
-        if (active) setState(token ? 'allowed' : 'denied');
+    // Dalawang paraan ng pagpasok: may tunay na token, o pumasok siya offline
+    // gamit ang naka-save na patunay. Sa pangalawa, wala talagang token —
+    // imposible iyon nang hindi nakakausap ang server — kaya ang naka-save na
+    // datos lang ang makikita niya hanggang bumalik ang koneksyon.
+    Promise.all([getToken(), isOfflineSession()])
+      .then(([token, offline]) => {
+        if (active) setState(token || offline ? 'allowed' : 'denied');
       })
       .catch(() => {
         // Kung hindi mabasa ang storage, mas ligtas ang ipadala sa login

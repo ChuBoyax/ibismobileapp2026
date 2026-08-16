@@ -22,7 +22,6 @@ export default function ReportsScreen() {
 
   const [data, setData] = useState<ReportData | null>(null);
   const [filters, setFilters] = useState<ReportFilters>({});
-  const [staleAt, setStaleAt] = useState<Date | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -35,13 +34,22 @@ export default function ReportsScreen() {
     if (isRefresh) setRefreshing(true);
     else setReloading(true);
 
+    // Laman muna, saka pagsasariwa — para agad may makita kahit walang signal.
+    if (!isRefresh) {
+      const saved = await getCache<ReportData>(CacheKey.reports);
+
+      if (saved && mounted.current) {
+        setData(saved.value);
+        setLoading(false);
+      }
+    }
+
     try {
       const result = await reports(active);
       if (!mounted.current) return;
 
       setData(result);
       setError('');
-      setStaleAt(null);
       putCache(CacheKey.reports, result);
     } catch (err) {
       if (await handleAuthError(err)) return;
@@ -51,7 +59,6 @@ export default function ReportsScreen() {
 
       if (cached) {
         setData(cached.value);
-        setStaleAt(cached.updatedAt);
         setError('');
       } else {
         setError(err instanceof ApiError ? err.message : 'Could not load the report.');
@@ -162,18 +169,6 @@ export default function ReportsScreen() {
             <View style={styles.flex}>
               <Text style={styles.bannerTitle}>{error}</Text>
               <Text style={styles.bannerHint}>Tap to retry</Text>
-            </View>
-          </Pressable>
-        )}
-
-        {!!staleAt && (
-          <Pressable style={styles.offlineBanner} onPress={() => load(filters, true)}>
-            <Ionicons name="cloud-offline-outline" size={18} color={Colors.warning} />
-            <View style={styles.flex}>
-              <Text style={styles.offlineTitle}>Offline — showing saved report</Text>
-              <Text style={styles.offlineHint}>
-                Last updated {relativeTime(staleAt.toISOString())} · Tap to retry
-              </Text>
             </View>
           </Pressable>
         )}
@@ -337,25 +332,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
     fontSize: FontSize.xs,
     color: Colors.danger,
-  },
-  offlineBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-    marginTop: Spacing.lg,
-    padding: Spacing.md,
-    borderRadius: Radius.md,
-    backgroundColor: Colors.warningLight,
-  },
-  offlineTitle: {
-    fontSize: FontSize.sm,
-    fontWeight: '700',
-    color: Colors.warning,
-  },
-  offlineHint: {
-    marginTop: 2,
-    fontSize: FontSize.xs,
-    color: Colors.warning,
   },
   reloading: {
     opacity: 0.45,

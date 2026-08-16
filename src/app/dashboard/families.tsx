@@ -2,10 +2,11 @@ import { useMemo } from 'react';
 
 import { RecordListScreen, type RecordItem } from '@/components/record-list-screen';
 import { useRecordList } from '@/features/registration/use-record-list';
+import { CacheKey } from '@/lib/db';
 import { listFamilies, type FamilySummary } from '@/lib/api';
 
 export default function FamiliesScreen() {
-  const list = useRecordList<FamilySummary>(listFamilies);
+  const list = useRecordList<FamilySummary>(listFamilies, CacheKey.listFamilies);
 
   const items = useMemo<RecordItem[]>(
     () =>

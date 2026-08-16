@@ -17,6 +17,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TAB_BAR_HEIGHT } from '@/components/animated-tab-bar';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '@/constants/theme';
 import { ActivitySheet } from '@/components/activity-sheet';
+import { ReauthBanner } from '@/components/reauth-banner';
+import { SyncPillRow } from '@/components/sync-pill';
 import {
   ApiError,
   dashboard,
@@ -28,6 +30,7 @@ import {
 import { formatNumber, relativeTime } from '@/lib/format';
 import { CacheKey, getCache, putCache } from '@/lib/db';
 import { handleAuthError } from '@/lib/session';
+import { useOfflineSession } from '@/lib/use-offline-session';
 import { useProfile } from '@/lib/use-profile';
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
@@ -123,12 +126,11 @@ function StatCard({ meta, stat }: { meta: (typeof STAT_META)[number]; stat?: Sta
 export default function DashboardScreen() {
   const insets = useSafeAreaInsets();
   const profile = useProfile();
+  const reauthNeeded = useOfflineSession();
 
   const [data, setData] = useState<DashboardData | null>(null);
   const [selected, setSelected] = useState<ActivityItem | null>(null);
   const [unread, setUnread] = useState(0);
-  /** Kapag may laman, luma ang ipinapakitang datos — galing sa lokal na cache. */
-  const [staleAt, setStaleAt] = useState<Date | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -138,13 +140,27 @@ export default function DashboardScreen() {
   const load = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
 
+    // Ipinapakita agad ang huling naka-save bago pa man subukan ang server.
+    //
+    // Kung hihintayin muna ang network, ang user na walang signal ay
+    // titingin ng spinner nang labinlimang segundo bago pa lumitaw ang datos
+    // na nasa cellphone na pala niya sa buong oras na iyon. Sa halip: laman
+    // muna, saka pagsasariwa — kaya agad ang bukas kahit nasa bundok ka.
+    if (!isRefresh) {
+      const saved = await getCache<DashboardData>(CacheKey.dashboard);
+
+      if (saved && mounted.current) {
+        setData(saved.value);
+        setLoading(false);
+      }
+    }
+
     try {
       const result = await dashboard();
       if (!mounted.current) return;
 
       setData(result);
       setError('');
-      setStaleAt(null);
 
       // Itinatabi para may maipakita kahit mawalan ng internet mamaya.
       putCache(CacheKey.dashboard, result);
@@ -168,7 +184,6 @@ export default function DashboardScreen() {
 
       if (cached) {
         setData(cached.value);
-        setStaleAt(cached.updatedAt);
         setError('');
       } else {
         setError(
@@ -248,6 +263,9 @@ export default function DashboardScreen() {
               {barangays || 'No barangay assigned'}
             </Text>
           </View>
+
+          {/* Lumilitaw lang kapag may naghihintay o may kailangang ayusin. */}
+          <SyncPillRow />
         </View>
 
         <View style={styles.content}>
@@ -261,17 +279,8 @@ export default function DashboardScreen() {
             </Pressable>
           )}
 
-          {!!staleAt && (
-            <Pressable style={styles.offlineBanner} onPress={() => load(true)}>
-              <Ionicons name="cloud-offline-outline" size={18} color={Colors.warning} />
-              <View style={styles.flex}>
-                <Text style={styles.offlineTitle}>Offline — showing saved data</Text>
-                <Text style={styles.offlineHint}>
-                  Last updated {relativeTime(staleAt.toISOString())} · Tap to retry
-                </Text>
-              </View>
-            </Pressable>
-          )}
+          {/* Lumilitaw lang kapag may talagang naghihintay na tala. */}
+          <ReauthBanner />
 
           {loading && !data ? (
             <View style={styles.loading}>
@@ -443,25 +452,6 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
     backgroundColor: Colors.dangerLight,
     borderRadius: Radius.md,
-  },
-  offlineBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-    marginBottom: Spacing.lg,
-    padding: Spacing.md,
-    borderRadius: Radius.md,
-    backgroundColor: Colors.warningLight,
-  },
-  offlineTitle: {
-    fontSize: FontSize.sm,
-    fontWeight: '700',
-    color: Colors.warning,
-  },
-  offlineHint: {
-    marginTop: 2,
-    fontSize: FontSize.xs,
-    color: Colors.warning,
   },
   bannerText: {
     fontSize: FontSize.sm,

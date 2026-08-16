@@ -2,10 +2,11 @@ import { useMemo } from 'react';
 
 import { RecordListScreen, type RecordItem } from '@/components/record-list-screen';
 import { useRecordList } from '@/features/registration/use-record-list';
+import { CacheKey } from '@/lib/db';
 import { listResidents, type ResidentSummary } from '@/lib/api';
 
 export default function ResidentsScreen() {
-  const list = useRecordList<ResidentSummary>(listResidents);
+  const list = useRecordList<ResidentSummary>(listResidents, CacheKey.listResidents);
 
   const items = useMemo<RecordItem[]>(
     () =>
