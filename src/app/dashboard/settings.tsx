@@ -16,6 +16,7 @@ import {
 } from '@/lib/auth-storage';
 import { authenticate, getBiometricSupport, type BiometricSupport } from '@/lib/biometrics';
 import { clearCache } from '@/lib/db';
+import { clearOutbox, counts } from '@/lib/outbox';
 import { endSession } from '@/lib/session';
 import { initialOf, useProfile } from '@/lib/use-profile';
 
@@ -158,8 +159,22 @@ export default function SettingsScreen() {
     }
   }
 
-  function handleLogout() {
-    Alert.alert('Log out', 'Your PIN and biometric settings stay saved on this device.', [
+  async function handleLogout() {
+    const queue = await counts();
+
+    // Hindi tahimik na iiwan ang hindi pa naipapadalang trabaho. Nananatili
+    // ito sa cellphone at ipapadala pagbalik ng login, pero dapat alam iyon
+    // ng user bago siya umalis.
+    const warning =
+      queue.total > 0
+        ? `${queue.total} record${queue.total === 1 ? '' : 's'} on this device ${
+            queue.total === 1 ? 'has' : 'have'
+          } not been sent yet. ${
+            queue.total === 1 ? 'It' : 'They'
+          } will stay here and sync when you log back in.`
+        : 'Your PIN and biometric settings stay saved on this device.';
+
+    Alert.alert('Log out', warning, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Log out',
@@ -186,7 +201,9 @@ export default function SettingsScreen() {
           style: 'destructive',
           onPress: async () => {
             await apiLogout();
-            await Promise.all([clearSecurity(), clearCache()]);
+            // Buong pag-alis sa device — kasama ang hindi pa naipapadalang
+            // tala, dahil pwedeng iba na ang susunod na mag-login dito.
+            await Promise.all([clearSecurity(), clearCache(), clearOutbox()]);
             setPinSet(false);
             setBiometricOn(false);
             router.replace('/login');

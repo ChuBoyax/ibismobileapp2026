@@ -25,14 +25,48 @@ async function open() {
 
   await database.execAsync(`
     PRAGMA journal_mode = WAL;
+
     CREATE TABLE IF NOT EXISTS cache (
       key        TEXT PRIMARY KEY NOT NULL,
       value      TEXT NOT NULL,
       updated_at INTEGER NOT NULL
     );
+
+    /*
+      Mga talang hindi pa naipapadala sa server.
+
+      Ang uuid ay galing sa app at siya ring ipapadala — idempotent ang server
+      sa uuid, kaya kahit maulit ang padala dahil sa mahinang signal, hindi
+      magdodoble ang tala.
+
+      Dalawang kopya ang itinatago at sinasadya iyon:
+        payload      — handa nang i-POST, kaya hindi kailangan ng sync engine
+                       ang form definition o ang /options mula sa server
+        form_values  — hilaw na sagot, para mabuksan ulit sa form kapag may
+                       kailangang ayusin
+    */
+    CREATE TABLE IF NOT EXISTS outbox (
+      uuid        TEXT PRIMARY KEY NOT NULL,
+      type        TEXT NOT NULL,
+      label       TEXT,
+      payload     TEXT NOT NULL,
+      form_values TEXT NOT NULL,
+      status      TEXT NOT NULL,
+      attempts    INTEGER NOT NULL DEFAULT 0,
+      last_error  TEXT,
+      created_at  INTEGER NOT NULL,
+      updated_at  INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS outbox_status_idx ON outbox (status, created_at);
   `);
 
   return database;
+}
+
+/** Ibinubukas ang database para magamit ng ibang module (outbox, sync). */
+export async function getDatabase() {
+  return open();
 }
 
 export type Cached<T> = {
@@ -94,8 +128,26 @@ export async function removeCache(key: string): Promise<void> {
 }
 
 /**
- * Binubura ang lahat ng naka-cache. Tinatawag kapag nag-logout — hindi dapat
- * makita ng susunod na user ang datos ng nauna.
+ * Binubura ang datos ng user — dashboard, abiso, ulat — pero PINAPANATILI ang
+ * laman ng registration form.
+ *
+ * Ang laman ng form ay listahan ng barangay (purok, civil status, household),
+ * hindi pag-aari ng sinumang user. Kung buburahin ito sa bawat logout, hindi
+ * na bubukas ang form sa susunod na pagpasok kung walang signal — at iyon
+ * mismo ang sandaling pinakakailangan ito.
+ */
+export async function clearUserCache(): Promise<void> {
+  try {
+    const db = await open();
+    await db.runAsync("DELETE FROM cache WHERE key NOT LIKE 'form.%'");
+  } catch {
+    // walang anuman
+  }
+}
+
+/**
+ * Binubura ang lahat ng naka-cache, kasama ang laman ng form. Para sa tuluyang
+ * pag-alis sa device, kung saan maaaring iba na ang susunod na gagamit.
  */
 export async function clearCache(): Promise<void> {
   try {
@@ -112,4 +164,22 @@ export const CacheKey = {
   notifications: 'notifications',
   dismissedNotifications: 'notifications.dismissed',
   reports: 'reports',
+
+  /*
+    Ang kailangan ng registration form bago pa ito lumitaw. Kung wala nito,
+    hindi mabubuksan ang form nang walang signal — at walang saysay ang
+    offline na pag-save kung hindi mo naman maabot ang form.
+  */
+  formOptions: 'form.options',
+  formHouseholds: 'form.households',
+  formFamilies: 'form.families',
+  formResidents: 'form.residents',
+
+  /*
+    Laman ng tatlong tab na listahan. Ang walang hanap lang ang itinatabi —
+    ang resulta ng paghahanap ay panandalian at hindi kapaki-pakinabang offline.
+  */
+  listResidents: 'list.residents',
+  listFamilies: 'list.families',
+  listHouseholds: 'list.households',
 } as const;

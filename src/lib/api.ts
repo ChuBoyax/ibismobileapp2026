@@ -58,13 +58,19 @@ export class ApiError extends Error {
 
 async function request<T>(
   path: string,
-  options: { method?: string; body?: unknown; token?: string | null } = {}
+  options: {
+    method?: string;
+    body?: unknown;
+    token?: string | null;
+    /** Mas maikli para sa login — mabilis dapat malaman kung offline. */
+    timeout?: number;
+  } = {}
 ): Promise<T> {
-  const { method = 'GET', body, token } = options;
+  const { method = 'GET', body, token, timeout = TIMEOUT_MS } = options;
 
   // Walang built-in na timeout ang fetch, kaya AbortController ang gamit.
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeout);
 
   let response: Response;
 
@@ -122,6 +128,10 @@ export function login(email: string, password: string) {
   return request<LoginResult>('/login', {
     method: 'POST',
     body: { email, password, device_name: 'ibis-mobile' },
+    // Mas maikli kaysa sa karaniwan: kapag hindi maabot ang server, mas mabuting
+    // malaman agad at dumaan sa offline na pagpasok kaysa magmukhang nakatunganga
+    // ang app nang labinlimang segundo.
+    timeout: 6000,
   });
 }
 
@@ -432,7 +442,10 @@ function hasFiles(value: unknown): boolean {
   return false;
 }
 
-async function authed<T>(path: string, options: { method?: string; body?: unknown } = {}) {
+async function authed<T>(
+  path: string,
+  options: { method?: string; body?: unknown; timeout?: number } = {}
+) {
   const token = await getToken();
   return request<T>(path, { ...options, token });
 }
@@ -463,10 +476,22 @@ export function listFamilies(params?: { search?: string; perPage?: number }) {
   return authed<Paginated<FamilySummary>>(`/families${listQuery(params)}`);
 }
 
+/**
+ * Gaano katagal hihintayin ang pag-save bago ito ilagay sa pila.
+ *
+ * Mas maikli kaysa sa karaniwan, at LIGTAS ITONG PAIKLIIN: idempotent ang
+ * server sa uuid. Kung sakaling nakapasok pala ang tala at natimeout lang
+ * tayo, ang muling pagpapadala ay sasagutin ng "already recorded" — walang
+ * madodobleng residente. Kaya mas mabuting isuko agad at ipadala sa likod
+ * kaysa panoorin ng user ang "Saving…" nang labinlimang segundo.
+ */
+const CREATE_TIMEOUT_MS = 8000;
+
 export function createResident(payload: RecordPayload) {
   return authed<{ data: { id: number }; message: string }>('/residents', {
     method: 'POST',
     body: hasFiles(payload) ? toFormData(payload) : payload,
+    timeout: CREATE_TIMEOUT_MS,
   });
 }
 
@@ -474,6 +499,7 @@ export function createHousehold(payload: RecordPayload) {
   return authed<{ data: { id: number }; message: string }>('/households', {
     method: 'POST',
     body: hasFiles(payload) ? toFormData(payload) : payload,
+    timeout: CREATE_TIMEOUT_MS,
   });
 }
 
@@ -481,5 +507,6 @@ export function createFamily(payload: RecordPayload) {
   return authed<{ data: { id: number }; message: string }>('/families', {
     method: 'POST',
     body: hasFiles(payload) ? toFormData(payload) : payload,
+    timeout: CREATE_TIMEOUT_MS,
   });
 }

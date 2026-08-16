@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, Image, StyleSheet, View } from 'react-native';
 
 import { Colors, Radius, Spacing } from '@/constants/theme';
-import { getToken, hasPin } from '@/lib/auth-storage';
+import { getToken, hasPin, isOfflineSession } from '@/lib/auth-storage';
 
 type Target = '/lock' | '/login' | '/dashboard';
 
@@ -28,9 +28,11 @@ export default function Index() {
     let active = true;
 
     async function decide(): Promise<Target> {
-      const token = await getToken();
+      // Ang offline na pagpasok ay walang token, pero may karapatan pa ring
+      // makita ang naka-save na datos — kaya pareho silang tinatanggap dito.
+      const [token, offline] = await Promise.all([getToken(), isOfflineSession()]);
 
-      if (!token) return '/login';
+      if (!token && !offline) return '/login';
 
       return (await hasPin()) ? '/lock' : '/dashboard';
     }

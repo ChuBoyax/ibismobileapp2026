@@ -1,10 +1,16 @@
 import { Stack } from 'expo-router';
+import { useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { Colors } from '@/constants/theme';
+import { startSync } from '@/lib/sync';
 
 export default function RootLayout() {
+  // Minsan lang sa buong buhay ng app: nakikinig sa koneksyon at nagpapadala
+  // ng naka-queue na tala pagbalik ng signal.
+  useEffect(() => startSync(), []);
+
   return (
     // Kailangan ito sa pinakalabas para gumana ang mga galaw na hawak ng
     // gesture handler, kasama na ang pag-swipe pabalik.

@@ -17,7 +17,21 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TextField } from '@/components/text-field';
 import { Colors, FontSize, Radius, Spacing } from '@/constants/theme';
 import { ApiError, login as loginRequest } from '@/lib/api';
-import { hasPin, saveEmail, saveProfile, saveToken } from '@/lib/auth-storage';
+import { isDeviceOnline } from '@/lib/connectivity';
+import { warmFormSources } from '@/features/registration/use-form-sources';
+import {
+  getSavedEmail,
+  hasPasswordProof,
+  hasPin,
+  saveEmail,
+  savePasswordProof,
+  setOfflineSession,
+  saveProfile,
+  saveToken,
+  verifyPassword,
+} from '@/lib/auth-storage';
+import { switchUser } from '@/lib/session';
+import { resumeSync } from '@/lib/sync';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -45,6 +59,26 @@ export default function LoginScreen() {
     };
   }, []);
 
+  // Alam naman ng app kung sino ang huling gumamit ng cellphone na ito.
+  // Ipapasok na natin ang email para password na lang ang itatype niya —
+  // lalo nang mahalaga kapag kailangan niyang mag-login ulit para makapag-sync.
+  const [returning, setReturning] = useState(false);
+  useEffect(() => {
+    let active = true;
+
+    getSavedEmail()
+      .then((saved) => {
+        if (!active || !saved) return;
+        setEmail(saved);
+        setReturning(true);
+      })
+      .catch(() => {});
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   function validate() {
     const next: Errors = {};
 
@@ -63,6 +97,58 @@ export default function LoginScreen() {
     return next;
   }
 
+  /**
+   * Pagpasok gamit ang naka-save na patunay. Walang token — imposible iyon
+   * nang hindi nakakausap ang server — kaya ang naka-save na datos lang ang
+   * makikita hanggang bumalik ang koneksyon.
+   *
+   * MAHALAGA ANG TUMPAK NA MENSAHE DITO. Dati, ang maling password offline ay
+   * sinasagot ng "Cannot reach the server" — iisipin ng user na signal ang
+   * problema at paulit-ulit siyang susubok kahit ang password lang pala ang
+   * mali. Kaya bawat dahilan ay may sariling sagot.
+   */
+  async function signInOffline(
+    normalized: string,
+    secret: string
+  ): Promise<{ ok: true } | { ok: false; message: string }> {
+    const [saved, hasProof] = await Promise.all([getSavedEmail(), hasPasswordProof()]);
+    const savedEmail = saved?.trim().toLowerCase();
+
+    if (!savedEmail || !hasProof) {
+      return {
+        ok: false,
+        message:
+          'No internet connection. Sign in once while connected so this device can recognize you offline.',
+      };
+    }
+
+    if (savedEmail !== normalized) {
+      return {
+        ok: false,
+        message: `No internet connection. This device can only sign in offline as ${savedEmail}.`,
+      };
+    }
+
+    if (!(await verifyPassword(secret))) {
+      return { ok: false, message: 'Incorrect password.' };
+    }
+
+    await setOfflineSession(true);
+
+    if (mounted.current) setLoading(false);
+    router.replace((await hasPin()) ? '/dashboard' : '/setup-security');
+
+    return { ok: true };
+  }
+
+  /** Ipinapakita ang tumpak na dahilan ng pagkabigo ng offline na pagpasok. */
+  function showOfflineError(message: string) {
+    if (!mounted.current) return;
+
+    setLoading(false);
+    setFormError(message);
+  }
+
   async function handleLogin() {
     setFormError('');
 
@@ -74,9 +160,44 @@ export default function LoginScreen() {
     setLoading(true);
 
     try {
+      // Kapag alam na ng cellphone na walang koneksyon, walang saysay na
+      // maghintay ng timeout — diretso na sa naka-save na patunay.
+      if (!(await isDeviceOnline())) {
+        const offline = await signInOffline(normalized, password);
+
+        if (offline.ok) return;
+
+        showOfflineError(offline.message);
+        return;
+      }
+
       const { token, user } = await loginRequest(normalized, password);
 
-      await Promise.all([saveToken(token), saveProfile(user), saveEmail(user.email)]);
+      // Kung iba ang nag-login kaysa sa huling gumamit, linisin muna ang
+      // naiwan ng nauna bago pumasok ang bago.
+      await switchUser(user.email);
+
+      await Promise.all([
+        saveToken(token),
+        saveProfile(user),
+        // Laging maliit ang letra kapag itinatabi, para tumugma sa paghahambing
+        // mamaya kahit iba ang laki ng letrang tinipa o isinagot ng server.
+        saveEmail(user.email.trim().toLowerCase()),
+        // Patunay para sa offline na login sa susunod. Hash lang ito — hindi
+        // naitatago ang mismong password.
+        savePasswordProof(password),
+        // May tunay nang token — hindi na offline ang pagpasok na ito.
+        setOfflineSession(false),
+      ]);
+
+      // May bagong token na — kung may naghihintay na tala na huminto dahil
+      // nawalan ng bisa ang luma, ipagpatuloy agad.
+      resumeSync();
+
+      // Habang tiyak na may koneksyon, inihahanda ang laman ng registration
+      // form. Kung hindi ngayon, ang unang pagbukas ng form sa lugar na
+      // walang signal ang mabibigo — at huli na doon.
+      void warmFormSources();
 
       // Kapag wala pang PIN, dumadaan muna sa security setup bago ang dashboard.
       // replace (hindi push) para hindi na makabalik sa login gamit ang back button.
@@ -85,6 +206,21 @@ export default function LoginScreen() {
       if (mounted.current) setLoading(false);
       router.replace(next);
     } catch (error) {
+      const status = error instanceof ApiError ? error.status : -1;
+
+      // Hindi maabot ang server. Kung nakapag-login na dati ang taong ito sa
+      // cellphone na ito, papasukin siya gamit ang naka-save na patunay — ang
+      // datos na makikita niya ay ang huling nakuha, at maghihintay sa pila
+      // ang anumang idadagdag niya.
+      if (status === 0) {
+        const offline = await signInOffline(normalized, password);
+
+        if (offline.ok) return;
+
+        showOfflineError(offline.message);
+        return;
+      }
+
       if (!mounted.current) return;
 
       setLoading(false);
@@ -122,7 +258,9 @@ export default function LoginScreen() {
 
           {/* Puting card na nakapatong sa header */}
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Sign in to your account</Text>
+            <Text style={styles.cardTitle}>
+              {returning ? 'Welcome back' : 'Sign in to your account'}
+            </Text>
 
             {!!formError && (
               <View style={styles.banner}>
@@ -162,6 +300,8 @@ export default function LoginScreen() {
               autoCapitalize="none"
               returnKeyType="done"
               onSubmitEditing={handleLogin}
+              // Kilala na ang user — sa password na agad ang cursor.
+              autoFocus={returning}
             />
 
             <Pressable

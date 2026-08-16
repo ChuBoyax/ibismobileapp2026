@@ -61,7 +61,6 @@ function NotificationsScreen() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [staleAt, setStaleAt] = useState<Date | null>(null);
 
   const mounted = useRef(true);
 
@@ -72,13 +71,22 @@ function NotificationsScreen() {
     const saved = await getCache<Dismissed>(CacheKey.dismissedNotifications);
     if (mounted.current && saved) setDismissed(saved.value);
 
+    // Laman muna, saka pagsasariwa — para agad may makita kahit walang signal.
+    if (!isRefresh) {
+      const stored = await getCache<Notification[]>(CacheKey.notifications);
+
+      if (stored && mounted.current) {
+        setItems(stored.value);
+        setLoading(false);
+      }
+    }
+
     try {
       const result = await notifications();
       if (!mounted.current) return;
 
       setItems(result.notifications);
       setError('');
-      setStaleAt(null);
 
       putCache(CacheKey.notifications, result.notifications);
     } catch (err) {
@@ -91,7 +99,6 @@ function NotificationsScreen() {
 
       if (cached) {
         setItems(cached.value);
-        setStaleAt(cached.updatedAt);
         setError('');
       } else {
         setError(
@@ -183,18 +190,6 @@ function NotificationsScreen() {
             <View style={styles.flex}>
               <Text style={styles.bannerTitle}>{error}</Text>
               <Text style={styles.bannerHint}>Tap to retry</Text>
-            </View>
-          </Pressable>
-        )}
-
-        {!!staleAt && (
-          <Pressable style={styles.offlineBanner} onPress={() => load(true)}>
-            <Ionicons name="cloud-offline-outline" size={18} color={Colors.warning} />
-            <View style={styles.flex}>
-              <Text style={styles.offlineTitle}>Offline — showing saved data</Text>
-              <Text style={styles.offlineHint}>
-                Last updated {relativeTime(staleAt.toISOString())} · Tap to retry
-              </Text>
             </View>
           </Pressable>
         )}
@@ -294,25 +289,6 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: Spacing.xl,
-  },
-  offlineBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-    marginBottom: Spacing.lg,
-    padding: Spacing.md,
-    borderRadius: Radius.md,
-    backgroundColor: Colors.warningLight,
-  },
-  offlineTitle: {
-    fontSize: FontSize.sm,
-    fontWeight: '700',
-    color: Colors.warning,
-  },
-  offlineHint: {
-    marginTop: 2,
-    fontSize: FontSize.xs,
-    color: Colors.warning,
   },
   banner: {
     flexDirection: 'row',
