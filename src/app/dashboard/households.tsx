@@ -41,6 +41,7 @@ export default function HouseholdsScreen() {
       icon="home-outline"
       createHref="/registration/household"
       createLabel="New"
+      editHref={(id) => `/registration/household?id=${id}`}
       items={items}
       total={list.total}
       loading={list.loading}

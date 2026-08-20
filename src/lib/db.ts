@@ -16,14 +16,40 @@ import * as SQLite from 'expo-sqlite';
 
 const DB_NAME = 'ibis.db';
 
-let database: SQLite.SQLiteDatabase | null = null;
+/**
+ * ANG PROMISE ANG ITINATAGO, HINDI ANG RESULTA — at mahalaga ang pagkakaiba.
+ *
+ * Dati, ang naka-bukas nang database ang itinatago. Pero sa pagitan ng
+ * pagsisimula ng pagbukas at ng pagkakatago nito, ang sinumang tumawag ay
+ * makikitang wala pa — kaya magbubukas siya ng PANGALAWANG koneksyon at
+ * uulitin ang paggawa ng table. Mas masahol: may makakakuha ng database bago
+ * pa matapos ang CREATE TABLE, at magtatanong sa table na wala pa.
+ *
+ * Nangyayari ito sa pagbukas ng app, kung saan sabay-sabay na humihingi ang
+ * dashboard, ang sync engine, at ang profile. Paminsan-minsan lang ito
+ * bumabagsak — kaya mahirap hulihin at madaling isipin na ibang bagay ang sira.
+ *
+ * Sa pagtatago ng promise, iisa lang ang tunay na pagbukas gaano man karami
+ * ang sabay na humingi. Kapag nabigo, binubura ito para may pag-asa pa ang
+ * susunod na subok.
+ */
+let databasePromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
-async function open() {
-  if (database) return database;
+function open(): Promise<SQLite.SQLiteDatabase> {
+  if (!databasePromise) {
+    databasePromise = initialise().catch((error) => {
+      databasePromise = null;
+      throw error;
+    });
+  }
 
-  database = await SQLite.openDatabaseAsync(DB_NAME);
+  return databasePromise;
+}
 
-  await database.execAsync(`
+async function initialise(): Promise<SQLite.SQLiteDatabase> {
+  const db = await SQLite.openDatabaseAsync(DB_NAME);
+
+  await db.execAsync(`
     PRAGMA journal_mode = WAL;
 
     CREATE TABLE IF NOT EXISTS cache (
@@ -61,7 +87,35 @@ async function open() {
     CREATE INDEX IF NOT EXISTS outbox_status_idx ON outbox (status, created_at);
   `);
 
-  return database;
+  await addOutboxEditColumns(db);
+
+  return db;
+}
+
+/**
+ * Dinaragdagan ang `outbox` ng dalawang column na kailangan ng pag-edit.
+ *
+ * MAY APP NA SA CELLPHONE NG MGA GUMAGAMIT, at may naka-queue nang tala doon.
+ * Kaya hindi puwedeng basta ipalit ang bagong CREATE TABLE — mananatili ang
+ * lumang anyo at mabibigo ang bawat pagsingit. Dinaragdagan na lang ang
+ * kulang, at ang mga dating naka-queue ay mananatiling paglikha (walang
+ * `record_id`) tulad ng inaasahan nila.
+ *
+ *   record_id           — alin ang binabago; kapag wala, paglikha ito
+ *   expected_updated_at — kailan huling nagbago ang tala nang kunin ito, kaya
+ *                         natutukoy kung may ibang nakaunang magpalit
+ */
+async function addOutboxEditColumns(db: SQLite.SQLiteDatabase): Promise<void> {
+  const columns = await db.getAllAsync<{ name: string }>('PRAGMA table_info(outbox)');
+  const existing = new Set(columns.map((column) => column.name));
+
+  if (!existing.has('record_id')) {
+    await db.execAsync('ALTER TABLE outbox ADD COLUMN record_id INTEGER');
+  }
+
+  if (!existing.has('expected_updated_at')) {
+    await db.execAsync('ALTER TABLE outbox ADD COLUMN expected_updated_at TEXT');
+  }
 }
 
 /** Ibinubukas ang database para magamit ng ibang module (outbox, sync). */
@@ -183,3 +237,45 @@ export const CacheKey = {
   listFamilies: 'list.families',
   listHouseholds: 'list.households',
 } as const;
+
+/**
+ * Ang buong tala ng isang residente/sambahayan/pamilya, para sa pag-edit.
+ *
+ * BUOD LANG ANG NASA LISTAHAN — pangalan, purok, edad. Hindi sapat iyon para
+ * punuin ang labing-isang hakbang ng form. Kaya sa bawat pagbukas ng isang
+ * tala habang may signal, itinatabi ang buong laman nito: kapag nasa bundok
+ * na ang enumerator at kailangang itama ang isang numero, nariyan pa rin.
+ */
+export function recordCacheKey(type: string, id: number | string): string {
+  return `record.${type}.${id}`;
+}
+
+/**
+ * Sariling susi kada kombinasyon ng filter sa ulat.
+ *
+ * BAKIT HINDI IISA LANG ANG SUSI. Ang itinatago ng ulat ay BUOD na bilang,
+ * hindi hilaw na tala — kaya hindi ito kayang salain sa cellphone tulad ng
+ * ginagawa natin sa listahan. Kung iisa lang ang susi, ang pagpili ng purok
+ * habang walang koneksyon ay magpapakita ng bilang ng BUONG barangay habang
+ * nakasulat sa chip na "Purok 1". Mas masahol pa iyon kaysa walang ipakita:
+ * mukhang totoo ang numero, pero mali.
+ *
+ * Sa hiwalay na susi, ang nakita mo nang kombinasyon habang online ay
+ * mababalikan mo offline — at ang hindi pa nakikita ay malinaw na sasabihing
+ * kailangan ng koneksyon.
+ */
+export function reportCacheKey(filters: {
+  barangay_id?: number | null;
+  purok_id?: number | null;
+  sex?: string | null;
+  age_group?: string | null;
+}): string {
+  const parts = [
+    filters.barangay_id ?? '',
+    filters.purok_id ?? '',
+    filters.sex ?? '',
+    filters.age_group ?? '',
+  ];
+
+  return `${CacheKey.reports}:${parts.join('|')}`;
+}

@@ -43,7 +43,14 @@ export function SyncPill() {
   let tone: { backgroundColor: string } = styles.neutral;
   let textTone: { color: string } = styles.neutralText;
 
-  if (counts.needsFix > 0) {
+  // Ang banggaan ang nauuna sa lahat: naghihintay ito ng pasiya ng tao, at
+  // hindi ito matutuloy gaano man katagal hintayin.
+  if (counts.conflicts > 0) {
+    icon = 'git-compare-outline';
+    label = `${counts.conflicts} needs your decision`;
+    tone = styles.danger;
+    textTone = styles.dangerText;
+  } else if (counts.needsFix > 0) {
     icon = 'alert-circle';
     label = `${counts.needsFix} needs fixing`;
     tone = styles.danger;

@@ -9,7 +9,7 @@ import { RequireAuth } from '@/components/require-auth';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '@/constants/theme';
 import { relativeTime } from '@/lib/format';
 import { goBack } from '@/lib/navigation';
-import { list, remove, type OutboxItem, type OutboxType } from '@/lib/outbox';
+import { list, overrideConflict, remove, type OutboxItem, type OutboxType } from '@/lib/outbox';
 import { drain, subscribe } from '@/lib/sync';
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
@@ -84,8 +84,34 @@ function SyncScreen() {
     );
   }
 
+  /**
+   * Sinasadyang pagpapasiya: ang bersyon sa cellphone ang mananaig.
+   * Ipinapakita muna ang sasapitin — nakabura ito ng trabaho ng iba.
+   */
+  function confirmOverride(item: OutboxItem) {
+    Alert.alert(
+      'Keep your version?',
+      'The changes made by the other person will be replaced by yours. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Keep mine',
+          style: 'destructive',
+          onPress: async () => {
+            await overrideConflict(item.uuid);
+            await load();
+            void drain();
+          },
+        },
+      ]
+    );
+  }
+
+  const conflicts = items.filter((item) => item.status === 'conflict');
   const needsFix = items.filter((item) => item.status === 'needs_fix');
-  const waiting = items.filter((item) => item.status !== 'needs_fix');
+  const waiting = items.filter(
+    (item) => item.status !== 'needs_fix' && item.status !== 'conflict'
+  );
 
   return (
     <View style={styles.screen}>
@@ -137,6 +163,30 @@ function SyncScreen() {
           </View>
         ) : (
           <>
+            {conflicts.length > 0 && (
+              <>
+                {/* Sariling pangkat ito at hindi kasama sa "needs fixing":
+                    walang maling datos dito. Ang tanong ay kung kaninong
+                    bersyon ang mananaig — at tao lang ang makasasagot niyan. */}
+                <Text style={styles.groupLabel}>CHANGED BY SOMEONE ELSE</Text>
+                <View style={styles.list}>
+                  {conflicts.map((item, index) => (
+                    <Row
+                      key={item.uuid}
+                      item={item}
+                      last={index === conflicts.length - 1}
+                      onFix={() =>
+                        router.push(`/registration/${item.type}?draft=${item.uuid}` as never)
+                      }
+                      fixLabel="Review"
+                      onOverride={() => confirmOverride(item)}
+                      onDiscard={() => confirmDiscard(item)}
+                    />
+                  ))}
+                </View>
+              </>
+            )}
+
             {needsFix.length > 0 && (
               <>
                 <Text style={styles.groupLabel}>NEEDS FIXING</Text>
@@ -182,14 +232,18 @@ function Row({
   item,
   last,
   onFix,
+  fixLabel = 'Fix',
+  onOverride,
   onDiscard,
 }: {
   item: OutboxItem;
   last: boolean;
   onFix?: () => void;
+  fixLabel?: string;
+  onOverride?: () => void;
   onDiscard: () => void;
 }) {
-  const broken = item.status === 'needs_fix';
+  const broken = item.status === 'needs_fix' || item.status === 'conflict';
 
   return (
     <View style={[styles.row, last && styles.lastRow]}>
@@ -207,7 +261,10 @@ function Row({
             {item.label || TYPE_LABEL[item.type]}
           </Text>
           <Text style={styles.rowMeta}>
-            {TYPE_LABEL[item.type]} · saved {relativeTime(item.createdAt.toISOString())}
+            {/* Malaki ang pagkakaiba ng "bagong tala" at "pagbabago" kapag
+                nagpapasiya kung itatapon ito — kaya nakasulat. */}
+            {item.recordId ? 'Edited' : TYPE_LABEL[item.type]} · saved{' '}
+            {relativeTime(item.createdAt.toISOString())}
           </Text>
         </View>
 
@@ -232,7 +289,17 @@ function Row({
             onPress={onFix}
             accessibilityRole="button">
             <Ionicons name="create-outline" size={15} color={Colors.onPrimary} />
-            <Text style={styles.fixText}>Fix</Text>
+            <Text style={styles.fixText}>{fixLabel}</Text>
+          </Pressable>
+        )}
+
+        {!!onOverride && (
+          <Pressable
+            style={({ pressed }) => [styles.action, styles.override, pressed && styles.pressed]}
+            onPress={onOverride}
+            accessibilityRole="button">
+            <Ionicons name="cloud-upload-outline" size={15} color={Colors.text} />
+            <Text style={styles.overrideText}>Keep mine</Text>
           </Pressable>
         )}
 
@@ -388,6 +455,16 @@ const styles = StyleSheet.create({
     fontSize: FontSize.xs,
     fontWeight: '700',
     color: Colors.onPrimary,
+  },
+  override: {
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.divider,
+  },
+  overrideText: {
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+    color: Colors.text,
   },
   discard: {
     backgroundColor: Colors.surface,

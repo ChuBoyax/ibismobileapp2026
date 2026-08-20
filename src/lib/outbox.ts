@@ -19,7 +19,13 @@ export type OutboxStatus =
   /** Kasalukuyang ipinapadala. */
   | 'syncing'
   /** Tinanggihan ng server — may mali sa datos, kailangan ng tao. */
-  | 'needs_fix';
+  | 'needs_fix'
+  /**
+   * May ibang nakaunang magpalit ng parehong tala habang offline ito.
+   * Hindi ito kayang pagpasiyahan ng app — ang gumagamit ang pipili kung
+   * ang kanyang bersyon ba ang mananaig o ang nasa server na.
+   */
+  | 'conflict';
 
 export type OutboxItem = {
   uuid: string;
@@ -30,6 +36,10 @@ export type OutboxItem = {
   status: OutboxStatus;
   attempts: number;
   lastError: string | null;
+  /** Alin ang binabago. Kapag null, bagong tala ito. */
+  recordId: number | null;
+  /** Kailan huling nagbago ang tala nang buksan ito sa form. */
+  expectedUpdatedAt: string | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -43,6 +53,8 @@ type Row = {
   status: string;
   attempts: number;
   last_error: string | null;
+  record_id: number | null;
+  expected_updated_at: string | null;
   created_at: number;
   updated_at: number;
 };
@@ -161,6 +173,8 @@ function toItem(row: Row): OutboxItem {
     status: row.status as OutboxStatus,
     attempts: row.attempts,
     lastError: row.last_error,
+    recordId: row.record_id ?? null,
+    expectedUpdatedAt: row.expected_updated_at ?? null,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
   };
@@ -172,6 +186,9 @@ export async function enqueue(input: {
   label?: string | null;
   payload: Record<string, unknown>;
   formValues: Record<string, unknown>;
+  /** Kapag may laman, pagbabago ito ng umiiral nang tala at hindi paglikha. */
+  recordId?: number | null;
+  expectedUpdatedAt?: string | null;
   /** Bakit hindi ito naipadala agad — para may makita ang user sa pila. */
   reason?: string;
 }): Promise<void> {
@@ -184,8 +201,10 @@ export async function enqueue(input: {
   // parehong tala — hindi bagong entry.
   await db.runAsync(
     `INSERT OR REPLACE INTO outbox
-       (uuid, type, label, payload, form_values, status, attempts, last_error, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, COALESCE((SELECT created_at FROM outbox WHERE uuid = ?), ?), ?)`,
+       (uuid, type, label, payload, form_values, status, attempts, last_error,
+        record_id, expected_updated_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?,
+             COALESCE((SELECT created_at FROM outbox WHERE uuid = ?), ?), ?)`,
     input.uuid,
     input.type,
     input.label ?? null,
@@ -194,34 +213,91 @@ export async function enqueue(input: {
     // Ang babala sa larawan ang nauuna — mas tiyak iyon kaysa sa pangkalahatang
     // dahilan ng pagkabigo ng pagpapadala.
     warning ?? input.reason ?? null,
+    input.recordId ?? null,
+    input.expectedUpdatedAt ?? null,
     input.uuid,
     now,
     now
   );
 }
 
-export async function list(): Promise<OutboxItem[]> {
-  const db = await getDatabase();
-  const rows = await db.getAllAsync<Row>('SELECT * FROM outbox ORDER BY created_at ASC');
+/*
+  ANG MGA PAGBASA AY HINDI DAPAT MAGPABAGSAK NG APP.
 
-  return rows.map(toItem);
+  Kapag nabigo ang isang query — abala ang database, o hindi pa tapos ang
+  pagbukas — dating tumatalbog ang error paakyat sa tumawag. Ang bunga nito ay
+  screen na walang reaksyon: ang pindutan ng Log out ay naghihintay ng bilang
+  bago magpakita ng dialog, kaya kapag nabigo ang bilang, walang lumalabas at
+  mukhang patay ang pindutan.
+
+  Ang pagbabalik ng walang laman ay mas tapat: makikita ng user ang app na may
+  kulang na impormasyon, hindi ang app na hindi tumutugon.
+*/
+export async function list(): Promise<OutboxItem[]> {
+  try {
+    const db = await getDatabase();
+    const rows = await db.getAllAsync<Row>('SELECT * FROM outbox ORDER BY created_at ASC');
+
+    return rows.map(toItem);
+  } catch {
+    return [];
+  }
 }
 
 export async function get(uuid: string): Promise<OutboxItem | null> {
-  const db = await getDatabase();
-  const row = await db.getFirstAsync<Row>('SELECT * FROM outbox WHERE uuid = ?', uuid);
+  try {
+    const db = await getDatabase();
+    const row = await db.getFirstAsync<Row>('SELECT * FROM outbox WHERE uuid = ?', uuid);
 
-  return row ? toItem(row) : null;
+    return row ? toItem(row) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * May naghihintay pa bang pagbabago para sa talang ito?
+ *
+ * BAKIT KAILANGAN. Kapag nag-edit ang user habang walang signal, ang bagong
+ * laman ay nasa pila lang — hindi pa sa server at hindi rin sa naka-cache na
+ * kopya. Kung muli niyang bubuksan ang parehong tala mula sa listahan,
+ * makikita niya ang DATING laman at mag-aakalang hindi natuloy ang pag-edit.
+ * Mag-e-edit siyang muli, at magkakaroon ng dalawang magkaibang padala para
+ * sa iisang tala.
+ *
+ * Kaya bago magpakita, tinitingnan muna kung may naghihintay — at kung meron,
+ * iyon ang ipinapakita, sa parehong uuid.
+ */
+export async function findByRecord(
+  type: OutboxType,
+  recordId: number
+): Promise<OutboxItem | null> {
+  try {
+    const db = await getDatabase();
+    const row = await db.getFirstAsync<Row>(
+      'SELECT * FROM outbox WHERE type = ? AND record_id = ? ORDER BY created_at DESC LIMIT 1',
+      type,
+      recordId
+    );
+
+    return row ? toItem(row) : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Ang mga handa nang ipadala — hindi kasama ang naghihintay ng pag-aayos. */
 export async function pending(): Promise<OutboxItem[]> {
-  const db = await getDatabase();
-  const rows = await db.getAllAsync<Row>(
-    "SELECT * FROM outbox WHERE status IN ('pending', 'syncing') ORDER BY created_at ASC"
-  );
+  try {
+    const db = await getDatabase();
+    const rows = await db.getAllAsync<Row>(
+      "SELECT * FROM outbox WHERE status IN ('pending', 'syncing') ORDER BY created_at ASC"
+    );
 
-  return rows.map(toItem);
+    return rows.map(toItem);
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -300,14 +376,43 @@ export async function setStatus(
   );
 }
 
+/**
+ * Ipinipilit ang bersyong nasa cellphone.
+ *
+ * Tinatanggal ang `expected_updated_at`, kaya hindi na titingnan ng server
+ * ang bersyon at tatanggapin nito ang padala. SINASADYANG PAGPAPASIYA ITO NG
+ * TAO — pinili niyang matabunan ang pagbabago ng iba pagkatapos ipakita sa
+ * kanya na may nagbago. Hindi ito ginagawa ng app nang kusa.
+ */
+export async function overrideConflict(uuid: string): Promise<void> {
+  const db = await getDatabase();
+
+  await db.runAsync(
+    `UPDATE outbox
+        SET status = 'pending',
+            expected_updated_at = NULL,
+            attempts = 0,
+            last_error = ?,
+            updated_at = ?
+      WHERE uuid = ?`,
+    'You chose to keep your version. It will replace the one on the server.',
+    Date.now(),
+    uuid
+  );
+}
+
 export type OutboxCounts = {
   pending: number;
   syncing: number;
   needsFix: number;
+  conflicts: number;
   total: number;
 };
 
 export async function counts(): Promise<OutboxCounts> {
+  const empty = { pending: 0, syncing: 0, needsFix: 0, conflicts: 0, total: 0 };
+
+  try {
   const db = await getDatabase();
 
   const rows = await db.getAllAsync<{ status: string; total: number }>(
@@ -320,12 +425,16 @@ export async function counts(): Promise<OutboxCounts> {
     pending: byStatus.pending ?? 0,
     syncing: byStatus.syncing ?? 0,
     needsFix: byStatus.needs_fix ?? 0,
+    conflicts: byStatus.conflict ?? 0,
     total: 0,
   };
 
-  result.total = result.pending + result.syncing + result.needsFix;
+  result.total = result.pending + result.syncing + result.needsFix + result.conflicts;
 
   return result;
+  } catch {
+    return empty;
+  }
 }
 
 /** Binubura ang buong pila. Ginagamit kapag nag-logout nang tuluyan. */

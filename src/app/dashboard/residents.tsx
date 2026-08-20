@@ -41,6 +41,7 @@ export default function ResidentsScreen() {
       icon="people-outline"
       createHref="/registration/resident"
       createLabel="New"
+      editHref={(id) => `/registration/resident?id=${id}`}
       items={items}
       total={list.total}
       loading={list.loading}

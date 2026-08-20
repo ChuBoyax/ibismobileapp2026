@@ -160,7 +160,17 @@ export default function SettingsScreen() {
   }
 
   async function handleLogout() {
-    const queue = await counts();
+    // Hindi pinapabayaang mabitin ang pindutan.
+    //
+    // Ang bilang ay pampaganda lang ng babala — kung mabigo itong kunin,
+    // dapat lumabas pa rin ang dialog. Kung hahayaang tumalbog ang error,
+    // walang mangyayari sa pagpindot at aakalain ng user na sira ang app.
+    const queue = await counts().catch(() => ({
+      pending: 0,
+      syncing: 0,
+      needsFix: 0,
+      total: 0,
+    }));
 
     // Hindi tahimik na iiwan ang hindi pa naipapadalang trabaho. Nananatili
     // ito sa cellphone at ipapadala pagbalik ng login, pero dapat alam iyon

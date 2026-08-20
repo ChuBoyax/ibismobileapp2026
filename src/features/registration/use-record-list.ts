@@ -10,10 +10,43 @@ const SEARCH_DEBOUNCE_MS = 350;
 type Fetcher<T> = (params: { search?: string; perPage?: number }) => Promise<Paginated<T>>;
 
 /**
+ * Tinutugma ang hinahanap sa lahat ng teksto ng isang tala.
+ *
+ * Ginagamit lang ito kapag hindi maabot ang server. Malawak ang saklaw —
+ * pangalan, purok, civil status, anumang salita sa tala — kaya kahit anong
+ * naaalala ng user ay may pag-asang tumama. Sa hindi tiyak na paghahanap,
+ * mas mabuting sobra kaysa kulang.
+ */
+function matchesTerm(item: unknown, term: string): boolean {
+  const needle = term.trim().toLowerCase();
+  if (!needle) return true;
+
+  function walk(value: unknown): boolean {
+    if (typeof value === 'string') return value.toLowerCase().includes(needle);
+    if (typeof value === 'number') return String(value).includes(needle);
+    if (Array.isArray(value)) return value.some(walk);
+
+    if (value !== null && typeof value === 'object') {
+      return Object.values(value as Record<string, unknown>).some(walk);
+    }
+
+    return false;
+  }
+
+  return walk(item);
+}
+
+/**
  * Naghahatid ng laman ng mga tab na listahan.
  *
- * Sa server ginagawa ang paghahanap, hindi sa listahang nasa memorya — libo
- * ang residente ng isang barangay at unang pahina lang ang hawak ng app.
+ * SA SERVER ANG PAGHAHANAP KAPAG MAY KONEKSYON — libo ang residente ng isang
+ * barangay at unang pahina lang ang hawak ng app, kaya doon lang makikita
+ * ang lahat.
+ *
+ * KAPAG WALANG KONEKSYON, sa naka-save na listahan naghahanap. Limitado ito
+ * sa huling nakuhang mga tala, pero malaking pagkakaiba pa rin: ang
+ * enumerator sa bundok na naghahanap ng pangalang kanina lang niya nakita ay
+ * mahahanap niya ito, imbes na blangkong screen.
  */
 export function useRecordList<T>(fetcher: Fetcher<T>, cacheKey?: string) {
   const [items, setItems] = useState<T[]>([]);
@@ -37,17 +70,22 @@ export function useRecordList<T>(fetcher: Fetcher<T>, cacheKey?: string) {
       else setLoading(true);
       setError(null);
 
-      // Naka-save muna, saka pagsasariwa. Ang naka-imbak ay ang buong
-      // listahan lang — walang saysay itabi ang resulta ng paghahanap.
-      if (cacheKey && !term && mode === 'initial') {
-        const saved = await getCache<{ items: T[]; total: number }>(cacheKey);
+      // NAKA-SAVE MUNA, KAHIT MAY HINAHANAP.
+      //
+      // Ang naka-imbak ay ang buong listahan, kaya kaya nating salain ito
+      // dito mismo. Dalawa ang napapala: agad may lumalabas habang naghihintay
+      // ng server, at may resulta pa rin kahit walang koneksyon.
+      const saved = cacheKey ? await getCache<{ items: T[]; total: number }>(cacheKey) : null;
 
-        if (saved && id === requestId.current) {
-          setItems(saved.value.items);
-          setTotal(saved.value.total);
-          setOffline(true);
-          setLoading(false);
-        }
+      if (saved && id === requestId.current && mode === 'initial') {
+        const matched = term
+          ? saved.value.items.filter((item) => matchesTerm(item, term))
+          : saved.value.items;
+
+        setItems(matched);
+        setTotal(term ? matched.length : saved.value.total);
+        setOffline(true);
+        setLoading(false);
       }
 
       try {
@@ -59,20 +97,23 @@ export function useRecordList<T>(fetcher: Fetcher<T>, cacheKey?: string) {
         setTotal(result.meta.total);
         setOffline(false);
 
+        // Ang walang hanap lang ang itinatabi — iyon ang buong listahan, at
+        // iyon din ang sasalain kapag naghanap habang walang koneksyon.
         if (cacheKey && !term) {
           putCache(cacheKey, { items: result.data, total: result.meta.total });
         }
       } catch (err) {
         if (id !== requestId.current) return;
 
-        // Kung may naipakita nang naka-save, huwag itong burahin at palitan
-        // ng error — mas kapaki-pakinabang ang lumang listahan kaysa blangko.
-        const saved =
-          cacheKey && !term ? await getCache<{ items: T[]; total: number }>(cacheKey) : null;
+        // Hindi maabot ang server. Kung may naka-save, doon maghanap —
+        // mas kapaki-pakinabang ang lumang listahan kaysa blangko.
+        if (saved) {
+          const matched = term
+            ? saved.value.items.filter((item) => matchesTerm(item, term))
+            : saved.value.items;
 
-        if (saved && id === requestId.current) {
-          setItems(saved.value.items);
-          setTotal(saved.value.total);
+          setItems(matched);
+          setTotal(term ? matched.length : saved.value.total);
           setOffline(true);
           return;
         }
