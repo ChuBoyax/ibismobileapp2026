@@ -11,11 +11,36 @@ import { FilterBar } from '@/components/filter-bar';
 import { ScreenHeader } from '@/components/screen-header';
 import { Colors, FontSize, Radius, Spacing } from '@/constants/theme';
 import { ApiError, reports, type ReportData, type ReportFilters } from '@/lib/api';
-import { CacheKey, getCache, putCache } from '@/lib/db';
+import { getCache, putCache, reportCacheKey } from '@/lib/db';
 import { relativeTime } from '@/lib/format';
 import { handleAuthError } from '@/lib/session';
 
 const num = (value: number) => value.toLocaleString();
+
+/**
+ * Binabasa ang naka-save na ulat para sa isang kombinasyon ng filter.
+ *
+ * MAY ATRAS SA LUMANG SUSI. Noong iisa pa ang susi ng ulat ("reports"),
+ * doon naitago ang lahat. Nang gawin itong per-filter, naulila ang mga
+ * iyon — nandiyan pa sa cellphone, hindi na lang mahanap, kaya biglang
+ * blangko ang ulat ng mga taong may laman naman pala.
+ *
+ * Ang atras ay para sa walang filter lamang: iyon lang ang tiyak nating
+ * katumbas ng lumang naka-save. Sa may filter, mas mabuting walang ipakita
+ * kaysa ipakita ang bilang ng buong barangay na may nakasulat na purok.
+ */
+async function readReportCache(filters: ReportFilters) {
+  const exact = await getCache<ReportData>(reportCacheKey(filters));
+  if (exact) return exact;
+
+  const hasFilter = Object.values(filters).some((value) => value !== null && value !== undefined);
+  if (hasFilter) return null;
+
+  return getCache<ReportData>(LEGACY_REPORT_KEY);
+}
+
+/** Ang susi noong hindi pa hiwalay kada filter ang ulat. */
+const LEGACY_REPORT_KEY = 'reports';
 
 export default function ReportsScreen() {
   const insets = useSafeAreaInsets();
@@ -34,12 +59,18 @@ export default function ReportsScreen() {
     if (isRefresh) setRefreshing(true);
     else setReloading(true);
 
+    // Sariling susi kada kombinasyon ng filter. Ang ulat ay buod na bilang,
+    // hindi hilaw na tala — hindi ito kayang salain dito, kaya ang bawat
+    // kombinasyon ay hiwalay na itinatago.
+    const key = reportCacheKey(active);
+
     // Laman muna, saka pagsasariwa — para agad may makita kahit walang signal.
     if (!isRefresh) {
-      const saved = await getCache<ReportData>(CacheKey.reports);
+      const saved = await readReportCache(active);
 
       if (saved && mounted.current) {
         setData(saved.value);
+        setError('');
         setLoading(false);
       }
     }
@@ -50,19 +81,32 @@ export default function ReportsScreen() {
 
       setData(result);
       setError('');
-      putCache(CacheKey.reports, result);
+      putCache(key, result);
     } catch (err) {
       if (await handleAuthError(err)) return;
 
-      const cached = await getCache<ReportData>(CacheKey.reports);
+      const cached = await readReportCache(active);
       if (!mounted.current) return;
 
       if (cached) {
         setData(cached.value);
         setError('');
-      } else {
-        setError(err instanceof ApiError ? err.message : 'Could not load the report.');
+        return;
       }
+
+      // Walang naka-save para sa kombinasyong ito. Sinasabi nang tuwiran
+      // imbes na ipakita ang bilang ng ibang salain — ang numerong mukhang
+      // totoo pero mali ay mas mapanganib kaysa sa walang numero.
+      const filtered = Object.values(active).some((value) => value !== null && value !== undefined);
+
+      setData(null);
+      setError(
+        filtered
+          ? 'This filter has not been opened on this device yet. Connect to load it.'
+          : `${
+              err instanceof ApiError ? err.message : 'Could not load the report.'
+            } No saved report on this device yet.`
+      );
     } finally {
       if (mounted.current) {
         setLoading(false);

@@ -1,8 +1,17 @@
 import * as Network from 'expo-network';
 import { AppState } from 'react-native';
 
-import { ApiError, createFamily, createHousehold, createResident } from '@/lib/api';
+import {
+  ApiError,
+  createFamily,
+  createHousehold,
+  createResident,
+  updateFamily,
+  updateHousehold,
+  updateResident,
+} from '@/lib/api';
 import { isDeviceOnline } from '@/lib/connectivity';
+import { warmOfflineData } from '@/lib/warm-offline-data';
 import {
   counts,
   missingPhotos,
@@ -36,6 +45,15 @@ const CREATE: Record<
   resident: createResident,
   household: createHousehold,
   family: createFamily,
+};
+
+const UPDATE: Record<
+  OutboxType,
+  (id: number, payload: Record<string, unknown>, options?: { timeout?: number }) => Promise<unknown>
+> = {
+  resident: updateResident,
+  household: updateHousehold,
+  family: updateFamily,
 };
 
 /**
@@ -76,7 +94,7 @@ export type SyncState = {
 
 let running = false;
 let listeners: Listener[] = [];
-let lastCounts: OutboxCounts = { pending: 0, syncing: 0, needsFix: 0, total: 0 };
+let lastCounts: OutboxCounts = { pending: 0, syncing: 0, needsFix: 0, conflicts: 0, total: 0 };
 
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let retryDelay = FIRST_RETRY_MS;
@@ -166,7 +184,20 @@ export async function drain(): Promise<void> {
       await publish();
 
       try {
-        await CREATE[item.type](item.payload, { timeout: SYNC_TIMEOUT_MS });
+        if (item.recordId) {
+          // Pagbabago ng umiiral nang tala. Kasama ang bersyon nang huli
+          // itong buksan, kaya masasabi ng server kung may ibang nakaunang
+          // magpalit habang wala tayong signal.
+          await UPDATE[item.type](
+            item.recordId,
+            item.expectedUpdatedAt
+              ? { ...item.payload, expected_updated_at: item.expectedUpdatedAt }
+              : item.payload,
+            { timeout: SYNC_TIMEOUT_MS }
+          );
+        } else {
+          await CREATE[item.type](item.payload, { timeout: SYNC_TIMEOUT_MS });
+        }
 
         // Tagumpay — kasama ang kaso ng "naipadala na dati", dahil 200 rin
         // ang isinasagot ng server doon.
@@ -177,7 +208,12 @@ export async function drain(): Promise<void> {
         retryDelay = FIRST_RETRY_MS;
       } catch (error) {
         const status = error instanceof ApiError ? error.status : -1;
-        const message = error instanceof Error ? error.message : 'Sync failed.';
+        // Ang Sync queue ang tanging lugar kung saan kapaki-pakinabang ang
+        // teknikal na detalye — dito pumupunta ang naghahanap ng dahilan.
+        // Sa ibang screen, ang malinis na mensahe lang ang lumalabas.
+        const friendly = error instanceof Error ? error.message : 'Sync failed.';
+        const raw = error instanceof ApiError ? error.detail : undefined;
+        const message = raw && raw !== friendly ? `${friendly} (${raw})` : friendly;
 
         if (status === 401) {
           // Wala nang bisa ang token. Walang saysay ipagpatuloy — ibabalik
@@ -185,6 +221,16 @@ export async function drain(): Promise<void> {
           await setStatus(item.uuid, 'pending', { error: message });
           pausedForAuth = true;
           return;
+        }
+
+        if (status === 409) {
+          // May ibang nagpalit ng parehong tala. Hindi ito kayang pagpasiyahan
+          // ng app: ang dalawang bersyon ay parehong sinadya ng tao. Kaya
+          // hinihinto ito at inilalagay sa Sync queue, kung saan pipili ang
+          // gumagamit kung alin ang mananaig. Hindi ito bumibilang bilang
+          // subok — hindi naman ito maaayos ng pag-uulit.
+          await setStatus(item.uuid, 'conflict', { error: message });
+          continue;
         }
 
         if (status === 422 || status === 413) {
@@ -236,6 +282,16 @@ export function startSync(): () => void {
       pausedForAuth = false;
       cancelRetry();
       void drain();
+
+      // Ginagamit din ang sandaling ito para punan ang cache.
+      //
+      // Ang pag-init ay tumatakbo lang dati kapag nag-login. Ang taong
+      // naka-login na nang matagal ay hindi kailanman nakakakuha ng bagong
+      // laman hangga't hindi niya binubuksan ang bawat screen — kaya blangko
+      // siya sa lugar na walang signal kahit araw-araw namang dumadaan sa
+      // WiFi. Ang pagbabalik ng koneksyon ang tamang sandali: alam nating
+      // may signal, at hindi naghihintay ang user.
+      void warmOfflineData().catch(() => {});
     }
 
     wasOnline = isOnline;

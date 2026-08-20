@@ -35,6 +35,15 @@ type RecordListScreenProps = {
   /** Ruta ng form na bubuksan ng pindutang "bago". */
   createHref: Href;
   createLabel: string;
+  /*
+    Ruta ng parehong form, pero para sa umiiral nang tala. Ang id ay
+    idinurugtong dito kapag pinindot ang isang card.
+
+    ANG BUONG CARD ANG PINDUTAN, hindi isang maliit na icon sa gilid. Ang
+    chevron sa dulo ay matagal nang nakaguhit doon — nangako na iyon ng
+    pagbukas kahit wala pang nangyayari.
+  */
+  editHref: (id: string) => Href;
   items: RecordItem[];
   total: number;
   loading: boolean;
@@ -57,6 +66,7 @@ export function RecordListScreen({
   icon,
   createHref,
   createLabel,
+  editHref,
   items,
   total,
   loading,
@@ -131,14 +141,19 @@ export function RecordListScreen({
                 />
               </View>
 
+              {/* Walang laman ang listahan sa tatlong magkaibang dahilan, at
+                  magkaiba rin ang dapat sabihin sa bawat isa. Ang "Cannot load
+                  records" sa lahat ng kaso ay parang sira ang app, gayong
+                  minsan ay wala lang talagang tala o wala lang signal. */}
               <Text style={styles.emptyTitle}>
-                {error ? 'Cannot load records' : 'No records found'}
+                {error ? 'Nothing saved on this device' : 'No records found'}
               </Text>
               <Text style={styles.emptyText}>
-                {error ??
-                  (search
-                    ? 'Walang tugma sa hinahanap mo. Subukang baguhin ang salita.'
-                    : 'Wala pang naitatalang tala rito. Magsimula sa pindutang bago.')}
+                {error
+                  ? `${error} Records you have opened before will still show here.`
+                  : search
+                    ? 'No match for your search. Try a different word.'
+                    : 'No records here yet. Start with the New button.'}
               </Text>
 
               {!!error && (
@@ -160,7 +175,11 @@ export function RecordListScreen({
                 .duration(260)
                 .springify()
                 .damping(18)}>
-              <Pressable style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}>
+              <Pressable
+                style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
+                onPress={() => router.push(editHref(item.id))}
+                accessibilityRole="button"
+                accessibilityLabel={`Open ${item.title}`}>
                 <View style={styles.avatar}>
                   <Ionicons name={icon} size={20} color={Colors.primary} />
                 </View>

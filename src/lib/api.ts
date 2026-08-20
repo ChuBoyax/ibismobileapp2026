@@ -2,6 +2,7 @@ import Constants from 'expo-constants';
 import { File } from 'expo-file-system';
 
 import { getToken } from '@/lib/auth-storage';
+import { isDeviceOnline } from '@/lib/connectivity';
 
 /**
  * Kliyente ng IBIS backend (/api/ibis/*).
@@ -46,14 +47,30 @@ export type LoginResult = {
   user: ApiUser;
 };
 
-/** Error na may dalang status code para maiba ang mensahe kada sitwasyon. */
+/**
+ * Error na may dalang status code para maiba ang mensahe kada sitwasyon.
+ *
+ * DALAWA ANG ANYO NG MENSAHE, at sinasadya iyon:
+ *
+ *   message — para sa user. Malinis, walang jargon, at may sinasabi kung ano
+ *             ang ibig sabihin. Ito ang ipinapakita sa screen.
+ *   detail  — para sa nag-aayos. Ang hilaw na dahilan mula sa sistema, hal.
+ *             "java.net.UnknownHostException". Nasa Sync queue lang ito.
+ *
+ * Dating iisa lang ang mensahe. Nakatulong iyon sa paghahanap ng bug, pero
+ * mali ang ipakita sa user ang pangalan ng Java class — walang masasabi iyon
+ * sa kanya at nagmumukhang sira ang app.
+ */
 export class ApiError extends Error {
   status: number;
+  /** Hilaw na dahilan. Hindi ipinapakita sa karaniwang screen. */
+  detail?: string;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, detail?: string) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.detail = detail;
   }
 }
 
@@ -90,21 +107,22 @@ async function request<T>(
     });
   } catch (error) {
     const aborted = error instanceof Error && error.name === 'AbortError';
+    const detail = error instanceof Error ? error.message : undefined;
 
     if (aborted) {
-      throw new ApiError('The server took too long to respond. Please try again.', 0);
+      throw new ApiError('The server took too long to respond. Please try again.', 0, detail);
     }
 
-    // ISINASAMA ANG TUNAY NA DAHILAN, hindi lang "walang koneksyon".
-    //
-    // Ang bawat pagkabigo ng fetch ay dating iisa ang mensahe. Pero hindi
-    // pare-pareho ang dahilan: may walang signal, may maling IP, at may
-    // hindi mabasang file na kalakip. Ang huli ay bumabagsak AGAD — at
-    // kapag "walang koneksyon" ang sinasabi, hahabulin ng user ang signal
-    // habang ang file pala ang problema.
-    const detail = error instanceof Error && error.message ? ` — ${error.message}` : '';
+    // Tinatanong ang cellphone para tumpak ang sasabihin. Malaki ang
+    // pagkakaiba nito para sa user: kung walang signal, may magagawa siya;
+    // kung patay naman ang server, wala — at dapat malinaw kung alin.
+    const offline = !(await isDeviceOnline());
 
-    throw new ApiError(`Cannot reach the server${detail}`, 0);
+    throw new ApiError(
+      offline ? 'No internet connection.' : 'Cannot reach the server. Please try again in a moment.',
+      0,
+      detail
+    );
   } finally {
     clearTimeout(timer);
   }
@@ -571,5 +589,61 @@ export function createFamily(payload: RecordPayload, options: CreateOptions = {}
   return authed<{ data: { id: number }; message: string }>(
     '/families',
     createOptions(payload, options.timeout)
+  );
+}
+
+// ── Pag-edit ────────────────────────────────────────────────────────────
+
+/** Ang buong laman ng isang tala, kasama ang mga naka-ugnay na listahan. */
+export type FullRecord = Record<string, unknown> & { id: number; updated_at?: string | null };
+
+export function showResident(id: number) {
+  return authed<{ data: FullRecord }>(`/residents/${id}`);
+}
+
+export function showHousehold(id: number) {
+  return authed<{ data: FullRecord }>(`/households/${id}`);
+}
+
+export function showFamily(id: number) {
+  return authed<{ data: FullRecord }>(`/families/${id}`);
+}
+
+/*
+  POST ANG GINAGAMIT, HINDI PUT.
+
+  Hindi binabasa ng PHP ang multipart body ng PUT — walang laman ang $_FILES
+  at $_POST doon, kaya mawawala ang bagong larawan nang tahimik. Tumatanggap
+  ng pareho ang ruta sa backend, kaya iisang paraan na lang ang ginagamit
+  dito: POST, may larawan man o wala.
+*/
+function updateOptions(payload: RecordPayload, timeout?: number) {
+  const files = hasFiles(payload);
+
+  return {
+    method: 'POST',
+    body: files ? toFormData(payload) : payload,
+    timeout: timeout ?? (files ? UPLOAD_TIMEOUT_MS : TEXT_TIMEOUT_MS),
+  };
+}
+
+export function updateResident(id: number, payload: RecordPayload, options: CreateOptions = {}) {
+  return authed<{ data: FullRecord; message: string }>(
+    `/residents/${id}`,
+    updateOptions(payload, options.timeout)
+  );
+}
+
+export function updateHousehold(id: number, payload: RecordPayload, options: CreateOptions = {}) {
+  return authed<{ data: FullRecord; message: string }>(
+    `/households/${id}`,
+    updateOptions(payload, options.timeout)
+  );
+}
+
+export function updateFamily(id: number, payload: RecordPayload, options: CreateOptions = {}) {
+  return authed<{ data: FullRecord; message: string }>(
+    `/families/${id}`,
+    updateOptions(payload, options.timeout)
   );
 }

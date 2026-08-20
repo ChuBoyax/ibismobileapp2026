@@ -31,6 +31,7 @@ export default function FamiliesScreen() {
       icon="person-add-outline"
       createHref="/registration/family"
       createLabel="New"
+      editHref={(id) => `/registration/family?id=${id}`}
       items={items}
       total={list.total}
       loading={list.loading}

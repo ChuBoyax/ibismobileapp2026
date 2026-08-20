@@ -5,8 +5,12 @@ import {
   createResident,
   payloadHasFiles,
   serverReachable,
+  updateFamily,
+  updateHousehold,
+  updateResident,
 } from '@/lib/api';
 import { isDeviceOnline } from '@/lib/connectivity';
+import { putCache, recordCacheKey } from '@/lib/db';
 import { enqueue, type OutboxType } from '@/lib/outbox';
 import { drain, refresh } from '@/lib/sync';
 
@@ -30,6 +34,12 @@ const CREATE = {
   family: createFamily,
 } as const;
 
+const UPDATE = {
+  resident: updateResident,
+  household: updateHousehold,
+  family: updateFamily,
+} as const;
+
 export type SaveResult =
   /** Naipadala na sa server. */
   | { queued: false }
@@ -40,13 +50,19 @@ export type SaveResult =
    */
   | { queued: true; reason: string };
 
-export async function saveRecord(input: {
+export type SaveInput = {
   type: OutboxType;
   uuid: string;
   label?: string | null;
   payload: Record<string, unknown>;
   formValues: Record<string, unknown>;
-}): Promise<SaveResult> {
+  /** Kapag may laman, pagbabago ito ng umiiral nang tala. */
+  recordId?: number | null;
+  /** Bersyon ng tala nang buksan ito — dito nakikita ang banggaan. */
+  expectedUpdatedAt?: string | null;
+};
+
+export async function saveRecord(input: SaveInput): Promise<SaveResult> {
   // Kapag alam na ng cellphone na walang koneksyon, huwag nang subukan ang
   // server. Ang pagpapadala ay hihintayin ang buong timeout bago sumuko —
   // labinlimang segundong "Saving…" bago pa man mapunta sa pila, gayong
@@ -65,7 +81,20 @@ export async function saveRecord(input: {
   }
 
   try {
-    await CREATE[input.type]({ ...input.payload, uuid: input.uuid });
+    if (input.recordId) {
+      const { data } = await UPDATE[input.type](input.recordId, {
+        ...input.payload,
+        ...(input.expectedUpdatedAt ? { expected_updated_at: input.expectedUpdatedAt } : {}),
+      });
+
+      // Ang naka-tabing kopya ay luma na sa sandaling ito. Kung hindi ito
+      // papalitan, ang muling pagbukas ng talang ito habang walang signal ay
+      // magpapakita ng laman BAGO ang pag-edit — na parang hindi natuloy ang
+      // ginawa, at aakalain ng user na nasayang ang trabaho niya.
+      void putCache(recordCacheKey(input.type, input.recordId), data);
+    } else {
+      await CREATE[input.type]({ ...input.payload, uuid: input.uuid });
+    }
 
     return { queued: false };
   } catch (error) {
@@ -73,6 +102,12 @@ export async function saveRecord(input: {
 
     // Kayang ayusin ng user habang nasa form — ipakita agad.
     if (status === 422 || status === 413) throw error;
+
+    // May ibang nauna. Hindi ito itinatabi para subukan ulit mamaya: ang
+    // muling padala ay tatanggihan din, at ang tahimik na pag-uulit ay
+    // magbubura ng trabaho ng iba. Ipinapakita ito sa gumagamit ngayon din,
+    // habang nasa harap niya ang parehong bersyon.
+    if (status === 409) throw error;
 
     // Kailangan ng bagong login — hayaang hawakan ng tumawag.
     if (status === 401) throw error;
@@ -91,22 +126,15 @@ export async function saveRecord(input: {
   }
 }
 
-async function queue(
-  input: {
-    type: OutboxType;
-    uuid: string;
-    label?: string | null;
-    payload: Record<string, unknown>;
-    formValues: Record<string, unknown>;
-  },
-  reason?: string
-) {
+async function queue(input: SaveInput, reason?: string) {
   await enqueue({
     uuid: input.uuid,
     type: input.type,
     label: input.label ?? null,
     payload: { ...input.payload, uuid: input.uuid },
     formValues: input.formValues,
+    recordId: input.recordId ?? null,
+    expectedUpdatedAt: input.expectedUpdatedAt ?? null,
     reason,
   });
 

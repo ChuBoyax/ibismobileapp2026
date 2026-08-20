@@ -19,6 +19,7 @@ import { Colors, FontSize, Radius, Spacing } from '@/constants/theme';
 import { ApiError, login as loginRequest } from '@/lib/api';
 import { isDeviceOnline } from '@/lib/connectivity';
 import { warmFormSources } from '@/features/registration/use-form-sources';
+import { warmOfflineData } from '@/lib/warm-offline-data';
 import {
   getSavedEmail,
   hasPasswordProof,
@@ -198,6 +199,10 @@ export default function LoginScreen() {
       // form. Kung hindi ngayon, ang unang pagbukas ng form sa lugar na
       // walang signal ang mabibigo — at huli na doon.
       void warmFormSources();
+
+      // Lahat ng ipapakita ng app — dashboard, ulat, at tatlong listahan.
+      // Isang beses habang may signal, para may laman kahit saan dalhin.
+      void warmOfflineData();
 
       // Kapag wala pang PIN, dumadaan muna sa security setup bago ang dashboard.
       // replace (hindi push) para hindi na makabalik sa login gamit ang back button.

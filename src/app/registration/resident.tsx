@@ -4,52 +4,71 @@ import { FormGate } from '@/components/form/form-gate';
 import { FormWizard } from '@/components/form/form-wizard';
 import type { FormValues } from '@/components/form/types';
 import { buildPayload } from '@/features/registration/build-payload';
+import { buildValues } from '@/features/registration/build-values';
 import { residentSteps } from '@/features/registration/resident-form';
 import { saveRecord } from '@/features/registration/save-record';
-import { useDraft } from '@/features/registration/use-draft';
 import { useFormSources } from '@/features/registration/use-form-sources';
+import { useRecordForm } from '@/features/registration/use-record-form';
 
 const SAVED = 'The resident is now in the barangay registry.';
+const UPDATED = 'The changes are now in the barangay registry.';
 const QUEUED = 'Saved on this device. It will be sent automatically once you are back online.';
 
-export default function NewResidentScreen() {
+export default function ResidentFormScreen() {
   const { sources, loading, error, reload } = useFormSources({
     households: true,
     families: true,
   });
 
-  const draft = useDraft();
+  const form = useRecordForm('resident');
   const [message, setMessage] = useState(SAVED);
 
   const steps = useMemo(() => residentSteps(sources), [sources]);
+
+  // Ang naka-queue nang sagot ang nauuna sa laman ng server: iyon ang huling
+  // ipinasok ng gumagamit, at iyon ang inaasahan niyang makita pagbalik.
+  const initialValues = useMemo<FormValues>(() => {
+    if (form.draftValues) return form.draftValues;
+    if (form.record) return buildValues(steps, form.record);
+
+    return {};
+  }, [form.draftValues, form.record, steps]);
 
   async function handleSubmit(values: FormValues) {
     const payload = buildPayload(steps, values);
 
     const result = await saveRecord({
       type: 'resident',
-      uuid: draft.uuid,
+      uuid: form.uuid,
       label: [payload.first_name, payload.last_name].filter(Boolean).join(' ') || null,
       payload,
       formValues: values,
+      recordId: form.recordId,
+      expectedUpdatedAt: form.expectedUpdatedAt,
     });
 
     // Ang teknikal na dahilan ay nasa Sync queue — hindi dito. Ang kailangan
     // lang malaman ng user sa sandaling ito ay ligtas ang tala niya.
-    setMessage(result.queued ? QUEUED : SAVED);
+    setMessage(result.queued ? QUEUED : form.recordId ? UPDATED : SAVED);
   }
+
+  const editing = !!form.recordId;
+  const title = editing ? 'Edit resident' : form.mode === 'fix' ? 'Fix resident' : 'New resident';
 
   return (
     <FormGate
-      title="New resident"
-      loading={loading || draft.loading}
-      error={error}
-      onRetry={reload}>
+      title={title}
+      loading={loading || form.loading}
+      error={error || form.error}
+      onRetry={() => {
+        reload();
+        form.reload();
+      }}>
       <FormWizard
-        title={draft.isDraft ? 'Fix resident' : 'New resident'}
+        title={title}
         subtitle="Registry of Barangay Inhabitants"
         steps={steps}
-        initialValues={draft.initialValues}
+        initialValues={initialValues}
         onSubmit={handleSubmit}
         successMessage={message}
       />
