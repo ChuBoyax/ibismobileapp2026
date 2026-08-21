@@ -111,33 +111,68 @@ export function useRecordForm(type: OutboxType) {
         */
         const keepVersion = !!item?.expectedUpdatedAt;
 
+        /*
+          NAKA-TABI MUNA, SAKA ANG SERVER — at hindi kabaligtaran.
+
+          Dati, hinihintay muna ang sagot ng server bago tingnan ang naka-tabi.
+          Kapag walang signal, ang buong labinlimang segundo ng timeout ang
+          hinihintay bago pa man lumitaw ang formang nasa cellphone na pala.
+          Ganoon katagal ang "Loading the form…" para sa datos na nasa kamay
+          na natin mula pa kanina.
+
+          Ngayon: ipinapakita agad ang naka-tabi, at ang pagkuha sa server ay
+          sa likod na tumatakbo — pampasariwa lang ng nakaimbak para sa
+          susunod. Kaagad bumubukas ang form, may signal man o wala.
+        */
+        const saved = await getCache<FullRecord>(key);
+
+        if (!active) return;
+
+        if (saved) {
+          setRecord(saved.value);
+
+          // ANG BERSYON AY SUMUSUNOD SA LAMAN NA IPINAPAKITA.
+          //
+          // Ito ang bersyon ng kopyang aktwal na binabago ng user, kahit luma
+          // na ito. Kung ipagpapalit natin ito sa sariwang bersyong dumating
+          // sa likod, ang ipapadala ay sasabihing "batay ako sa pinakabago" —
+          // gayong ang nasa harap niya ay ang luma. Doon tahimik na nabubura
+          // ang trabaho ng ibang tao. Sa pananatili nito, mahuhuli ng server
+          // ang banggaan at tatanungin ang user.
+          if (!keepVersion) {
+            setExpectedUpdatedAt(
+              typeof saved.value.updated_at === 'string' ? saved.value.updated_at : null
+            );
+          }
+
+          // Bukas na ang form. Ang natitira ay nasa likod na.
+          setLoading(false);
+        }
+
         try {
           const { data } = await SHOW[type](targetId);
           if (!active) return;
 
-          setRecord(data);
-
-          if (!keepVersion) {
-            setExpectedUpdatedAt(typeof data.updated_at === 'string' ? data.updated_at : null);
-          }
-
+          // Laging pinapasariwa ang nakaimbak — ito ang magpapabilis sa
+          // susunod na pagbukas, may signal man o wala noon.
           void putCache(key, data);
+
+          // Ang laman sa harap ng user ay hindi na hinahawakan kapag may
+          // naipakita na: hindi dapat magbago ang form habang tinitipa niya
+          // ito. Ang sariwang kopya ay para sa susunod na pagbukas.
+          if (!saved) {
+            setRecord(data);
+
+            if (!keepVersion) {
+              setExpectedUpdatedAt(typeof data.updated_at === 'string' ? data.updated_at : null);
+            }
+          }
         } catch {
-          const saved = await getCache<FullRecord>(key);
           if (!active) return;
 
-          if (saved) {
-            setRecord(saved.value);
-
-            // ANG BERSYON AY GALING SA NAKA-TABING KOPYA, at maaaring luma na.
-            // Sinasadya iyon: kung may nagpalit habang wala tayong signal,
-            // dapat ngang mahuli iyon ng server at hindi tahimik na matabunan.
-            if (!keepVersion) {
-              setExpectedUpdatedAt(
-                typeof saved.value.updated_at === 'string' ? saved.value.updated_at : null
-              );
-            }
-          } else if (!draftUuid) {
+          // Walang naabot na server at wala ring naka-tabi — dito lang
+          // tunay na walang maipapakita.
+          if (!saved && !draftUuid) {
             setError(
               'This record has not been opened on this device yet. Connect to the server to open it.'
             );
