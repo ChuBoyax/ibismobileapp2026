@@ -54,6 +54,7 @@ const ACCOUNT: Option[] = [
     icon: 'information-circle-outline',
     tint: Colors.infoLight,
     color: Colors.info,
+    onPress: () => router.push('/about'),
   },
 ];
 

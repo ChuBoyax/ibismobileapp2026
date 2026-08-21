@@ -4,7 +4,7 @@
     "slug": "ibismobileapp",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/batologo-256.png",
     "scheme": "ibismobileapp",
     "userInterfaceStyle": "light",
     "ios": {
@@ -17,7 +17,8 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.yaxdev.ibismobileapp"
     },
     "web": {
       "output": "static",
@@ -35,14 +36,26 @@
       ],
       "expo-font",
       "expo-secure-store",
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
     },
     "extra": {
-      "apiBaseUrl": "http://192.168.0.103:8000"
+      "apiBaseUrl": "http://192.168.100.166:8000",
+      "router": {},
+      "eas": {
+        "projectId": "8058a11d-508b-4ee0-9fe3-3b131692287e"
+      }
     }
   }
 }

@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, type Href } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useRef, useState } from 'react';
 import {
@@ -73,10 +73,18 @@ const STAT_META: {
   },
 ];
 
-const QUICK_ACTIONS: { label: string; icon: IoniconName }[] = [
-  { label: 'Add Resident', icon: 'person-add-outline' },
-  { label: 'New Household', icon: 'home-outline' },
-  { label: 'Generate Report', icon: 'document-text-outline' },
+/*
+  Ang tatlong pinakamadalas na simulan mula sa dashboard.
+
+  Ang dating "Generate Report" ay inalis: may sariling tab na ang ulat, at
+  walang ginagawa ang pindutan kundi ulitin ang nandoon na. Ang pamilya naman
+  ay isa sa tatlong bagay na itinatala sa field, kaya nararapat itong nasa
+  parehong hanay ng residente at sambahayan.
+*/
+const QUICK_ACTIONS: { label: string; icon: IoniconName; href: Href }[] = [
+  { label: 'Add Resident', icon: 'person-add-outline', href: '/registration/resident' },
+  { label: 'Add Family', icon: 'people-outline', href: '/registration/family' },
+  { label: 'New Household', icon: 'home-outline', href: '/registration/household' },
 ];
 
 const ACTIVITY_STYLE: Record<ActivityItem['type'], { icon: IoniconName; tint: string; color: string }> =
@@ -300,7 +308,10 @@ export default function DashboardScreen() {
             {QUICK_ACTIONS.map((action) => (
               <Pressable
                 key={action.label}
-                style={({ pressed }) => [styles.actionCard, pressed && styles.actionCardPressed]}>
+                style={({ pressed }) => [styles.actionCard, pressed && styles.actionCardPressed]}
+                onPress={() => router.push(action.href)}
+                accessibilityRole="button"
+                accessibilityLabel={action.label}>
                 <View style={styles.actionIcon}>
                   <Ionicons name={action.icon} size={20} color={Colors.primary} />
                 </View>

@@ -1,34 +1,15 @@
-import Constants from 'expo-constants';
 import { File } from 'expo-file-system';
 
 import { getToken } from '@/lib/auth-storage';
 import { isDeviceOnline } from '@/lib/connectivity';
+import { serverUrl } from '@/lib/server-url';
 
 /**
  * Kliyente ng IBIS backend (/api/ibis/*).
  *
- * Nasa app.json ang base URL (expo.extra.apiBaseUrl) — iyon ang ginagamit sa
- * totoong build. Sa development, ang IP ng laptop ang madalas magpalit (bagong
- * DHCP lease, ibang WiFi), at tuwing mangyayari iyon ay tumitigil ang app kahit
- * walang nabago sa code. Dahil sa iisang makina tumatakbo ang Metro at ang
- * Laravel, ang host ng Metro na mismo ang pinagkukunan ng API host kapag naka-
- * dev — kaya sumasabay ito sa bawat palit ng IP nang walang inaayos.
+ * Nasa server-url.ts ang pagpili ng address: ang host ng Metro kapag naka-dev,
+ * at ang nakasulat sa app.json (`expo.extra.apiBaseUrl`) kapag totoong build.
  */
-
-const DEV_API_PORT = 8000;
-
-/** Hinahango ang host mula sa `hostUri` ng Metro, hal. "192.168.0.103:8081". */
-function apiHostFromMetro(): string | null {
-  const hostUri = Constants.expoConfig?.hostUri ?? Constants.expoGoConfig?.debuggerHost;
-  const host = hostUri?.split(':')[0];
-
-  return host ? `http://${host}:${DEV_API_PORT}` : null;
-}
-
-const BASE_URL: string =
-  (__DEV__ ? apiHostFromMetro() : null) ??
-  (Constants.expoConfig?.extra?.apiBaseUrl as string | undefined) ??
-  'http://127.0.0.1:8000';
 
 /** Ilang segundo bago sumuko ang request. */
 const TIMEOUT_MS = 15000;
@@ -93,7 +74,7 @@ async function request<T>(
   let response: Response;
 
   try {
-    response = await fetch(`${BASE_URL}/api/ibis${path}`, {
+    response = await fetch(`${serverUrl()}/api/ibis${path}`, {
       method,
       signal: controller.signal,
       headers: {
@@ -361,9 +342,6 @@ export async function logout() {
   }
 }
 
-/** Para maipakita sa Settings kung saan nakakabit ang app. */
-export const apiBaseUrl = BASE_URL;
-
 /* ── Registration ───────────────────────────────────────────────────── */
 
 /** Isang option na galing sa `options` na talahanayan ng RBI. */
@@ -392,7 +370,9 @@ export type ResidentSummary = {
   sex: string | null;
   age: number | null;
   civil_status: string | null;
+  civil_status_id: number | null;
   purok: string | null;
+  purok_id: number | null;
   contact_number: string | null;
   is_4ps_member: boolean;
   pwd: boolean;
@@ -406,7 +386,11 @@ export type HouseholdSummary = {
   uuid: string | null;
   house_number: string | null;
   house_type: string | null;
+  house_type_id: number | null;
   ownership_type: string | null;
+  ownership_type_id: number | null;
+  purok: string | null;
+  purok_id: number | null;
   number_of_residents: number | null;
   residents_count: number;
   has_business: boolean;
@@ -419,7 +403,9 @@ export type FamilySummary = {
   family_name: string | null;
   head_name: string | null;
   family_type: string | null;
+  family_type_id: number | null;
   income_level: string | null;
+  income_level_id: number | null;
   members_count: number;
 };
 
@@ -520,25 +506,77 @@ export async function fetchOptions() {
   return authed<{ barangay_id: number; options: OptionGroups }>('/options');
 }
 
-function listQuery(params: { search?: string; perPage?: number } = {}) {
+/**
+ * Kung paano sinasala ang isang listahan.
+ *
+ * Bukas ang hugis — bawat modulo ay may sariling dimensyon (purok at
+ * kasarian sa residente, uri ng bahay sa sambahayan), at pare-pareho naman
+ * ang pagdadala nila: pangalan ng param at halaga. Ang null ay "lahat".
+ */
+export type ListFilters = Record<string, string | number | null | undefined>;
+
+type ListParams = {
+  search?: string;
+  perPage?: number;
+  full?: boolean;
+  filters?: ListFilters;
+};
+
+function listQuery(params: ListParams = {}) {
   const query = new URLSearchParams();
   if (params.search?.trim()) query.set('search', params.search.trim());
   if (params.perPage) query.set('per_page', String(params.perPage));
+  if (params.full) query.set('full', '1');
+
+  for (const [key, value] of Object.entries(params.filters ?? {})) {
+    if (value !== null && value !== undefined && value !== '') {
+      query.set(key, String(value));
+    }
+  }
 
   const suffix = query.toString();
   return suffix ? `?${suffix}` : '';
 }
 
-export function listResidents(params?: { search?: string; perPage?: number }) {
+export function listResidents(params?: ListParams) {
   return authed<Paginated<ResidentSummary>>(`/residents${listQuery(params)}`);
 }
 
-export function listHouseholds(params?: { search?: string; perPage?: number }) {
+export function listHouseholds(params?: ListParams) {
   return authed<Paginated<HouseholdSummary>>(`/households${listQuery(params)}`);
 }
 
-export function listFamilies(params?: { search?: string; perPage?: number }) {
+export function listFamilies(params?: ListParams) {
   return authed<Paginated<FamilySummary>>(`/families${listQuery(params)}`);
+}
+
+/*
+  ANG BUONG LAMAN NG BAWAT TALA, PARA SA PAG-EDIT NANG WALANG SIGNAL.
+
+  Buod lang ang ibinabalik ng listahan sa itaas — pangalan, edad, purok.
+  Sapat iyon para sa card, kulang para punuin ang labing-isang hakbang ng
+  form. Kung ang buong laman ay kukunin lang isa-isa kapag pinindot, ang
+  pag-edit sa bundok ay gagana lang sa mga talang nagkataong nabuksan na
+  dati — at hindi mo naman alam nang maaga kung sino ang lalapit sa iyo.
+
+  Isang request kada uri, ang buong barangay ay nae-edit offline.
+*/
+export type FullListPage<T> = Paginated<T> & { records?: FullRecord[] };
+
+type FullListParams = { search?: string; perPage?: number; filters?: ListFilters };
+
+export function listResidentsFull(params?: FullListParams) {
+  return authed<FullListPage<ResidentSummary>>(`/residents${listQuery({ ...params, full: true })}`);
+}
+
+export function listHouseholdsFull(params?: FullListParams) {
+  return authed<FullListPage<HouseholdSummary>>(
+    `/households${listQuery({ ...params, full: true })}`
+  );
+}
+
+export function listFamiliesFull(params?: FullListParams) {
+  return authed<FullListPage<FamilySummary>>(`/families${listQuery({ ...params, full: true })}`);
 }
 
 /**

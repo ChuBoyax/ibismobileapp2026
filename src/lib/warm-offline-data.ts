@@ -1,12 +1,18 @@
 import {
   dashboard,
+  fetchOptions,
   listFamilies,
+  listFamiliesFull,
   listHouseholds,
+  listHouseholdsFull,
   listResidents,
+  listResidentsFull,
   notifications,
   reports,
+  type FullListPage,
 } from '@/lib/api';
-import { CacheKey, putCache, reportCacheKey } from '@/lib/db';
+import { CacheKey, putCache, recordCacheKey, reportCacheKey } from '@/lib/db';
+import type { OutboxType } from '@/lib/outbox';
 
 /**
  * Inihahanda ang lahat ng ipapakita ng app habang may koneksyon pa.
@@ -27,16 +33,16 @@ import { CacheKey, putCache, reportCacheKey } from '@/lib/db';
  * kukuha ulit kapag binuksan.
  */
 export async function warmOfflineData(): Promise<void> {
-  await Promise.allSettled([warmScreens(), warmReports()]);
+  await Promise.allSettled([warmScreens(), warmReports(), warmForms()]);
 }
 
 async function warmScreens(): Promise<void> {
   const tasks: [string, Promise<unknown>][] = [
     [CacheKey.dashboard, dashboard()],
     [CacheKey.notifications, notifications().then((result) => result.notifications)],
-    [CacheKey.listResidents, listResidents({ perPage: 50 }).then(toList)],
-    [CacheKey.listFamilies, listFamilies({ perPage: 50 }).then(toList)],
-    [CacheKey.listHouseholds, listHouseholds({ perPage: 50 }).then(toList)],
+    [CacheKey.listResidents, warmList('resident', listResidentsFull({ perPage: 50 }))],
+    [CacheKey.listFamilies, warmList('family', listFamiliesFull({ perPage: 50 }))],
+    [CacheKey.listHouseholds, warmList('household', listHouseholdsFull({ perPage: 50 }))],
   ];
 
   // allSettled, hindi all: ang isang nabigong bahagi ay hindi dapat magbura
@@ -49,6 +55,81 @@ async function warmScreens(): Promise<void> {
     )
   );
 }
+
+/**
+ * Itinatabi ang listahan AT ang buong laman ng bawat tala.
+ *
+ * Dalawang magkaibang pangangailangan, iisang request. Ang listahan ay para
+ * sa mga card; ang bawat buong tala ay para sa form kapag may pipindutin.
+ * Kung ang huli ay kukunin lang isa-isa sa oras ng pagpindot, ang pag-edit
+ * habang walang signal ay mabibigo — at doon mismo pinakakailangan.
+ */
+async function warmList<T>(type: OutboxType, request: Promise<FullListPage<T>>) {
+  const page = await request;
+
+  await Promise.all(
+    (page.records ?? []).map((record) =>
+      typeof record.id === 'number'
+        ? putCache(recordCacheKey(type, record.id), record)
+        : Promise.resolve()
+    )
+  );
+
+  return toList(page);
+}
+
+/**
+ * Ang laman ng registration form: mga dropdown at ang mga pagpipilian sa
+ * sambahayan, pamilya at residente.
+ *
+ * DITO NAKASALALAY KUNG GAANO KABILIS BUMUKAS ANG FORM. Kung wala ang mga
+ * ito, ang bawat pagbukas — bago man o pag-edit — ay maghihintay muna ng
+ * server bago may maipakita. Sa lugar na walang signal, iyon ang buong
+ * timeout bago pa man lumitaw ang unang tanong.
+ *
+ * Kasama rin sila sa mga chip ng filter, kaya ang paghahanap ayon sa purok
+ * ay may pagpipilian kahit saan ka man naroon.
+ */
+async function warmForms(): Promise<void> {
+  const tasks: [string, Promise<unknown>][] = [
+    [CacheKey.formOptions, fetchOptions().then((result) => result.options)],
+    [
+      CacheKey.formHouseholds,
+      listHouseholds({ perPage: PICKER_PAGE_SIZE }).then((page) =>
+        page.data.map((item) => ({
+          value: String(item.id),
+          label: item.house_number ?? `Household #${item.id}`,
+        }))
+      ),
+    ],
+    [
+      CacheKey.formFamilies,
+      listFamilies({ perPage: PICKER_PAGE_SIZE }).then((page) =>
+        page.data.map((item) => ({
+          value: String(item.id),
+          label: item.family_name ?? `Family #${item.id}`,
+        }))
+      ),
+    ],
+    [
+      CacheKey.formResidents,
+      listResidents({ perPage: PICKER_PAGE_SIZE }).then((page) =>
+        page.data.map((item) => ({ value: String(item.id), label: item.full_name }))
+      ),
+    ],
+  ];
+
+  const results = await Promise.allSettled(tasks.map(([, task]) => task));
+
+  await Promise.all(
+    results.map((result, index) =>
+      result.status === 'fulfilled' ? putCache(tasks[index][0], result.value) : Promise.resolve()
+    )
+  );
+}
+
+/** Kasinghaba ng ginagamit ng useFormSources, para pareho ang laman. */
+const PICKER_PAGE_SIZE = 100;
 
 /**
  * Ang ulat ay hindi kayang salain sa cellphone — buod na bilang ang laman
