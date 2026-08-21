@@ -4,6 +4,9 @@ import { ApiError } from '@/lib/api';
 import { clearSession, getSavedEmail, isOfflineSession } from '@/lib/auth-storage';
 import { clearCache } from '@/lib/db';
 import { clearOutbox } from '@/lib/outbox';
+// Ang talaan ng naipadala ay pag-aari ng gumamit, hindi ng cellphone —
+// hindi ito dapat makita ng susunod na papasok.
+import { clearHistory } from '@/lib/sync-history';
 
 /**
  * Tinatapos ang session — ang token lang.
@@ -33,7 +36,7 @@ export async function switchUser(email: string): Promise<void> {
 
   if (!previous || previous === next) return;
 
-  await Promise.all([clearCache(), clearOutbox()]);
+  await Promise.all([clearCache(), clearOutbox(), clearHistory()]);
 }
 
 /**

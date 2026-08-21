@@ -85,6 +85,31 @@ async function initialise(): Promise<SQLite.SQLiteDatabase> {
     );
 
     CREATE INDEX IF NOT EXISTS outbox_status_idx ON outbox (status, created_at);
+
+    /*
+      Talaan ng mga naipadala na.
+
+      BAKIT MAY TALAAN. Kapag naipadala ang isang tala, binubura ito sa pila —
+      at basta na lang itong nawawala sa screen. Walang natitirang patunay na
+      nangyari nga iyon. Ang enumerator na nag-encode ng dalawampung tala sa
+      bundok at bumalik sa bayan ay walang paraan para malamang nakarating
+      talaga ang lahat; ang tanging alam niya ay wala nang laman ang pila —
+      na siya ring hitsura ng talang tahimik na nawala.
+
+      Ang talaang ito ang kaibahan ng "wala nang naghihintay" sa "naipadala
+      na ang lahat". Magkaibang bagay iyon, at magkaiba rin ang dapat mabasa.
+    */
+    CREATE TABLE IF NOT EXISTS sync_history (
+      id        INTEGER PRIMARY KEY AUTOINCREMENT,
+      uuid      TEXT NOT NULL,
+      type      TEXT NOT NULL,
+      label     TEXT,
+      action    TEXT NOT NULL,
+      record_id INTEGER,
+      synced_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS sync_history_time_idx ON sync_history (synced_at DESC);
   `);
 
   await addOutboxEditColumns(db);
@@ -246,6 +271,17 @@ export const CacheKey = {
  * tala habang may signal, itinatabi ang buong laman nito: kapag nasa bundok
  * na ang enumerator at kailangang itama ang isang numero, nariyan pa rin.
  */
+/**
+ * Sariling susi kada napiling barangay sa dashboard.
+ *
+ * Kung iisa lang ang susi, ang bilang ng isang barangay ay maipapakita habang
+ * nakasulat sa chip ang pangalan ng iba — at ang numerong mukhang totoo pero
+ * mali ay mas mapanganib kaysa sa walang numero.
+ */
+export function dashboardCacheKey(barangayId: number | null): string {
+  return barangayId ? `${CacheKey.dashboard}:${barangayId}` : CacheKey.dashboard;
+}
+
 export function recordCacheKey(type: string, id: number | string): string {
   return `record.${type}.${id}`;
 }

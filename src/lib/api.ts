@@ -193,8 +193,26 @@ export type ActivityItem = {
   details: ActivityDetail[];
 };
 
+/**
+ * Barangay ba o buong bayan ang nasasakupan ng naka-login?
+ *
+ * Ang server ang nagpapasiya nito mula sa tungkulin, hindi ang app — doon
+ * nakatira ang tunay na kaalaman kung sino ang may pahintulot saan.
+ */
+export type DashboardScope = 'barangay' | 'municipal';
+
+/** Isang barangay na maaaring piliin sa salain. */
+export type BarangayChoice = {
+  id: number;
+  name: string;
+};
+
 export type DashboardData = {
+  /** Ang kasalukuyang tinitingnan — isa kapag may pinili, lahat kapag wala. */
   barangays: string[];
+  scope?: DashboardScope;
+  /** Lahat ng nasasakupan, kahit isa lang ang tinitingnan ngayon. */
+  available_barangays?: BarangayChoice[];
   stats: {
     residents: Stat;
     families: Stat;
@@ -204,9 +222,18 @@ export type DashboardData = {
   activity: ActivityItem[];
 };
 
-export async function dashboard() {
+/**
+ * Ang bilang sa dashboard.
+ *
+ * Kapag may ipinasang barangay, doon lang ang bilang. Kapag wala, lahat ng
+ * nasasakupan ng naka-login — iyon ang buod ng buong bayan para sa
+ * tagapangasiwa, at iisang barangay pa rin para sa karaniwang user.
+ */
+export async function dashboard(barangayId?: number | null) {
   const token = await getToken();
-  return request<DashboardData>('/dashboard', { token });
+  const query = barangayId ? `?barangay_id=${barangayId}` : '';
+
+  return request<DashboardData>(`/dashboard${query}`, { token });
 }
 
 // ── Reports ─────────────────────────────────────────────────────────────
@@ -366,6 +393,7 @@ export type Paginated<T> = {
 export type ResidentSummary = {
   id: number;
   uuid: string | null;
+  barangay_id: number | null;
   full_name: string;
   sex: string | null;
   age: number | null;
@@ -384,6 +412,7 @@ export type ResidentSummary = {
 export type HouseholdSummary = {
   id: number;
   uuid: string | null;
+  barangay_id: number | null;
   house_number: string | null;
   house_type: string | null;
   house_type_id: number | null;
@@ -400,6 +429,7 @@ export type HouseholdSummary = {
 export type FamilySummary = {
   id: number;
   uuid: string | null;
+  barangay_id: number | null;
   family_name: string | null;
   head_name: string | null;
   family_type: string | null;
