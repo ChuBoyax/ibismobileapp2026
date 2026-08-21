@@ -7,8 +7,10 @@ import { buildPayload } from '@/features/registration/build-payload';
 import { buildValues } from '@/features/registration/build-values';
 import { householdSteps } from '@/features/registration/household-form';
 import { saveRecord } from '@/features/registration/save-record';
+import { withBarangay } from '@/features/registration/barangay-step';
 import { useFormSources } from '@/features/registration/use-form-sources';
 import { useRecordForm } from '@/features/registration/use-record-form';
+import { useProfile } from '@/lib/use-profile';
 
 const SAVED = 'The household is now in the barangay registry.';
 const UPDATED = 'The changes are now in the barangay registry.';
@@ -17,10 +19,13 @@ const QUEUED = 'Saved on this device. It will be sent automatically once you are
 export default function HouseholdFormScreen() {
   const { sources, loading, error, reload } = useFormSources();
 
+  const profile = useProfile();
   const form = useRecordForm('household');
   const [message, setMessage] = useState(SAVED);
 
-  const steps = useMemo(() => householdSteps(sources), [sources]);
+  // Ang tanong na "aling barangay" ay idinaragdag lang kapag may pagpipilian.
+  // Tingnan ang withBarangay para sa dahilan kung bakit nasa umpisa ito.
+  const steps = useMemo(() => withBarangay(householdSteps(sources), profile), [sources, profile]);
 
   const initialValues = useMemo<FormValues>(() => {
     if (form.draftValues) return form.draftValues;

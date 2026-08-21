@@ -1,5 +1,5 @@
-import type { FilterOption } from '@/components/filter-bar';
-import type { ListFilters, OptionGroups } from '@/lib/api';
+import type { FilterGroup, FilterOption } from '@/components/filter-bar';
+import type { BarangayChoice, ListFilters, OptionGroups } from '@/lib/api';
 
 /**
  * Ginagawang pagpipilian sa filter ang mga option na galing sa server.
@@ -80,4 +80,35 @@ export function matchesSector(item: Record<string, unknown>, value: unknown): bo
   const sector = RESIDENT_SECTORS.find((entry) => entry.key === value);
 
   return sector ? item[sector.column] === true : true;
+}
+
+/**
+ * Ang salain ng barangay, para sa may maraming nasasakupan.
+ *
+ * LUMALABAS LANG KAPAG MAY TUNAY NA PAGPIPILIAN. Sa may iisang barangay, ang
+ * chip na "All barangays" ay walang sinasabi — laging iisa ang sagot, at ang
+ * pindutang walang epekto ay nagpapabigat lang sa screen.
+ *
+ * Nauuna ito sa hanay dahil ito ang pinakamalawak: pinipili muna kung saan,
+ * saka kung sino.
+ */
+export function barangayGroup(
+  choices: BarangayChoice[],
+  selected: string | number | null,
+  onSelect: (value: string | number | null) => void
+): FilterGroup[] {
+  if (choices.length < 2) return [];
+
+  return [
+    {
+      key: 'barangay_id',
+      label: 'Barangay',
+      selected,
+      onSelect,
+      options: [
+        { value: null, label: 'All barangays' },
+        ...choices.map((barangay) => ({ value: barangay.id, label: barangay.name })),
+      ],
+    },
+  ];
 }

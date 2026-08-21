@@ -17,6 +17,9 @@ import {
 import { authenticate, getBiometricSupport, type BiometricSupport } from '@/lib/biometrics';
 import { clearCache } from '@/lib/db';
 import { clearOutbox, counts } from '@/lib/outbox';
+// Ang talaan ng naipadala ay pag-aari ng gumamit, hindi ng cellphone —
+// hindi ito dapat makita ng susunod na papasok.
+import { clearHistory } from '@/lib/sync-history';
 import { endSession } from '@/lib/session';
 import { initialOf, useProfile } from '@/lib/use-profile';
 
@@ -214,7 +217,7 @@ export default function SettingsScreen() {
             await apiLogout();
             // Buong pag-alis sa device — kasama ang hindi pa naipapadalang
             // tala, dahil pwedeng iba na ang susunod na mag-login dito.
-            await Promise.all([clearSecurity(), clearCache(), clearOutbox()]);
+            await Promise.all([clearSecurity(), clearCache(), clearOutbox(), clearHistory()]);
             setPinSet(false);
             setBiometricOn(false);
             router.replace('/login');

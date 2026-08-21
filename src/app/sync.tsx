@@ -10,6 +10,7 @@ import { Colors, FontSize, Radius, Shadow, Spacing } from '@/constants/theme';
 import { relativeTime } from '@/lib/format';
 import { goBack } from '@/lib/navigation';
 import { list, overrideConflict, remove, type OutboxItem, type OutboxType } from '@/lib/outbox';
+import { clearHistory, history, type SyncEntry } from '@/lib/sync-history';
 import { drain, subscribe } from '@/lib/sync';
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
@@ -39,10 +40,16 @@ function SyncScreen() {
   const insets = useSafeAreaInsets();
 
   const [items, setItems] = useState<OutboxItem[]>([]);
+  const [sent, setSent] = useState<SyncEntry[]>([]);
   const [running, setRunning] = useState(false);
+  /** Bilang ng naipadala sa katatapos na pagsubok — ito ang berdeng abiso. */
+  const [justSynced, setJustSynced] = useState(0);
 
   const load = useCallback(async () => {
-    setItems(await list());
+    const [queued, done] = await Promise.all([list(), history(20)]);
+
+    setItems(queued);
+    setSent(done);
   }, []);
 
   useFocusEffect(
@@ -55,7 +62,13 @@ function SyncScreen() {
       // nakikita ang pag-usad nang hindi kailangang mag-pull.
       const unsubscribe = subscribe((state) => {
         if (!active) return;
+
         setRunning(state.running);
+
+        // Habang tumatakbo, hindi pa tapos ang bilang — sa dulo lang ito
+        // may kahulugan, kaya doon lang ito ipinapakita.
+        if (!state.running) setJustSynced(state.justSynced);
+
         void load();
       });
 
@@ -107,6 +120,24 @@ function SyncScreen() {
     );
   }
 
+  function confirmClearHistory() {
+    Alert.alert(
+      'Clear the sent list?',
+      'This only clears the list on this device. The records themselves stay in the barangay registry.',
+      [
+        { text: 'Keep', style: 'cancel' },
+        {
+          text: 'Clear',
+          style: 'destructive',
+          onPress: async () => {
+            await clearHistory();
+            await load();
+          },
+        },
+      ]
+    );
+  }
+
   const conflicts = items.filter((item) => item.status === 'conflict');
   const needsFix = items.filter((item) => item.status === 'needs_fix');
   const waiting = items.filter(
@@ -151,6 +182,21 @@ function SyncScreen() {
       <ScrollView
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + Spacing.xxl }]}
         showsVerticalScrollIndicator={false}>
+        {/* ANG PATUNAY NG TAGUMPAY.
+
+            Dati, ang tanging nakikita pagkatapos magpadala ay ang paglaho ng
+            laman ng pila — kaparehong hitsura ng talang tahimik na nawala.
+            Ito ang nagpapaiba sa dalawa, at nananatili hanggang sa susunod na
+            pagsubok kaya hindi ito napapalampas ng hindi nakatingin. */}
+        {justSynced > 0 && (
+          <View style={styles.success}>
+            <Ionicons name="checkmark-circle" size={20} color={Colors.primary} />
+            <Text style={styles.successText}>
+              {justSynced} record{justSynced === 1 ? '' : 's'} sent successfully.
+            </Text>
+          </View>
+        )}
+
         {items.length === 0 ? (
           <View style={styles.empty}>
             <View style={styles.emptyIcon}>
@@ -158,7 +204,9 @@ function SyncScreen() {
             </View>
             <Text style={styles.emptyTitle}>All synced</Text>
             <Text style={styles.emptyText}>
-              Records you save without a connection will wait here until the signal comes back.
+              {sent.length > 0
+                ? 'Nothing is waiting. Everything you saved has reached the barangay registry.'
+                : 'Records you save without a connection will wait here until the signal comes back.'}
             </Text>
           </View>
         ) : (
@@ -221,6 +269,45 @@ function SyncScreen() {
                 </View>
               </>
             )}
+          </>
+        )}
+
+        {sent.length > 0 && (
+          <>
+            <View style={styles.groupRow}>
+              <Text style={styles.groupLabel}>SENT</Text>
+              <Pressable onPress={confirmClearHistory} hitSlop={10} accessibilityRole="button">
+                <Text style={styles.clearLink}>Clear list</Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.list}>
+              {sent.map((entry, index) => (
+                <View
+                  key={entry.id}
+                  style={[styles.sentRow, index === sent.length - 1 && styles.lastRow]}>
+                  <View style={styles.sentIcon}>
+                    <Ionicons name="checkmark" size={14} color={Colors.primary} />
+                  </View>
+
+                  <View style={styles.flex}>
+                    <Text style={styles.rowTitle} numberOfLines={1}>
+                      {entry.label || TYPE_LABEL[entry.type]}
+                    </Text>
+                    <Text style={styles.rowMeta}>
+                      {/* Malaki ang pagkakaiba ng bagong tala at ng pagwawasto
+                          kapag binabalikan mo kung ano ang nangyari. */}
+                      {TYPE_LABEL[entry.type]} {entry.action === 'updated' ? 'updated' : 'added'} ·{' '}
+                      {relativeTime(entry.syncedAt.toISOString())}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+
+            <Text style={styles.footnote}>
+              The last {sent.length} sent from this device. Older ones are removed to save space.
+            </Text>
           </>
         )}
       </ScrollView>
@@ -370,6 +457,54 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: Spacing.xl,
+  },
+  success: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    padding: Spacing.lg,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.primaryLight,
+  },
+  successText: {
+    flex: 1,
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.primary,
+  },
+  groupRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  clearLink: {
+    marginTop: Spacing.lg,
+    marginBottom: Spacing.md,
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+    color: Colors.muted,
+  },
+  sentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    paddingVertical: Spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.divider,
+  },
+  sentIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: Radius.pill,
+    backgroundColor: Colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  footnote: {
+    marginTop: Spacing.md,
+    marginHorizontal: Spacing.xs,
+    fontSize: 11,
+    color: Colors.muted,
   },
   groupLabel: {
     marginTop: Spacing.lg,

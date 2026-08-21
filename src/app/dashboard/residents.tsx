@@ -3,6 +3,7 @@ import { useMemo } from 'react';
 import type { FilterGroup } from '@/components/filter-bar';
 import { RecordListScreen, type RecordItem } from '@/components/record-list-screen';
 import {
+  barangayGroup,
   choicesFrom,
   matchesById,
   matchesSector,
@@ -10,6 +11,7 @@ import {
 } from '@/features/registration/list-filters';
 import { useFormSources } from '@/features/registration/use-form-sources';
 import { useRecordList } from '@/features/registration/use-record-list';
+import { useProfile } from '@/lib/use-profile';
 import { CacheKey } from '@/lib/db';
 import { listResidentsFull, type ListFilters, type ResidentSummary } from '@/lib/api';
 
@@ -30,7 +32,7 @@ function matchesResident(item: ResidentSummary, filters: ListFilters): boolean {
   const record = item as unknown as Record<string, unknown>;
 
   return (
-    matchesById(record, filters, ['purok_id', 'civil_status_id', 'sex']) &&
+    matchesById(record, filters, ['purok_id', 'civil_status_id', 'sex', 'barangay_id']) &&
     matchesSector(record, filters.sector)
   );
 }
@@ -46,11 +48,21 @@ export default function ResidentsScreen() {
   // Walang hinihinging kaugnay na listahan — ang laman lang ng dropdown ang
   // kailangan dito, at naka-tabi na iyon mula sa registration form.
   const { sources } = useFormSources();
+  const profile = useProfile();
+  // Naka-memo: kung bagong array ito kada render, wala nang silbi ang
+  // useMemo sa ibaba at muling gagawa ng hanay sa bawat pindot.
+  const choices = useMemo(
+    () => profile?.barangays.map((b) => ({ id: b.id, name: b.name.trim() })) ?? [],
+    [profile]
+  );
 
   const setFilter = list.setFilter;
 
   const filters = useMemo<FilterGroup[]>(
     () => [
+      ...barangayGroup(choices, list.filters.barangay_id ?? null, (value) =>
+        setFilter('barangay_id', value)
+      ),
       {
         key: 'purok_id',
         label: 'Purok',
@@ -80,7 +92,7 @@ export default function ResidentsScreen() {
         options: SECTOR_CHOICES,
       },
     ],
-    [list.filters, setFilter, sources.options]
+    [list.filters, setFilter, sources.options, choices]
   );
 
   const items = useMemo<RecordItem[]>(

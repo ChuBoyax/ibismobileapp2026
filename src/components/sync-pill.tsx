@@ -16,12 +16,60 @@ type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
  * "lahat ay naipadala na". Kapansin-pansin lang ito kapag may naghihintay, at
  * pula lang kapag may kailangang gawin ang tao. Kung laging maingay ang
  * indicator, natututo ang user na huwag itong tingnan.
+ *
+ * Isang pagbubukod: ang berdeng "naipadala na". Iyon ang tanging patunay na
+ * nakikita ng taong hindi nagbubukas ng Sync queue, kaya lumalabas ito —
+ * pero pansamantala lang.
  */
+
+/**
+ * Gaano katagal nananatili ang berdeng abiso.
+ *
+ * Sapat para mabasa ng nakatingin, maikli para hindi maging permanenteng
+ * palamuti. Ang tandang laging nakasindi ay natututong balewalain.
+ */
+const SUCCESS_MS = 8000;
+
 export function SyncPill() {
   const [state, setState] = useState<SyncState | null>(null);
+  const [celebrating, setCelebrating] = useState(0);
   const offlineSession = useOfflineSession();
 
-  useEffect(() => subscribe(setState), []);
+  /*
+    ANG BERDENG ABISO AY PANSAMANTALA.
+
+    Ito ang tanging patunay na nakikita ng taong hindi nagbubukas ng Sync
+    queue: naipadala nga ang inencode niya. Kung wala ito, ang tanging
+    nakikita niya ay ang paglaho ng dilaw na bilang — kapareho ng hitsura ng
+    talang tahimik na nawala.
+
+    Hindi ito nananatili: ang dashboard ay hindi lugar ng permanenteng
+    pagbati. Ang buong talaan ay nasa Sync queue para sa naghahanap.
+
+    NASA LOOB NG SUBSCRIPTION ANG PAGTATAKDA, hindi sa katawan ng effect.
+    Ang sync engine ay panlabas na sistema, at ang callback nito ang tamang
+    lugar ng setState — ang gawin iyon sa katawan ng effect ay nagdudulot ng
+    dagdag na render sa bawat pagbabago ng bilang.
+  */
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const unsubscribe = subscribe((next) => {
+      setState(next);
+
+      if (next.running || next.justSynced === 0) return;
+
+      setCelebrating(next.justSynced);
+
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => setCelebrating(0), SUCCESS_MS);
+    });
+
+    return () => {
+      unsubscribe();
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
 
   if (!state) return null;
 
@@ -30,11 +78,12 @@ export function SyncPill() {
   // pansin para sa iisang bagay — at iyon mismo ang nakakalito.
   if (offlineSession) return null;
 
-  const { running, counts } = state;
+  const { counts, running } = state;
   const waiting = counts.pending + counts.syncing;
 
-  // Walang naiwan at walang tumatakbo — walang dapat sabihin.
-  if (counts.total === 0 && !running) return null;
+  // Walang naiwan, walang tumatakbo, at walang katatapos lang — walang
+  // dapat sabihin.
+  if (counts.total === 0 && !running && celebrating === 0) return null;
 
   // Malawak ang uri para makapagpalit ng tono — magkakaiba ang literal na
   // hex ng bawat estilo, kaya hindi sila magkatugma kung babanggitin nang tuwid.
@@ -43,9 +92,14 @@ export function SyncPill() {
   let tone: { backgroundColor: string } = styles.neutral;
   let textTone: { color: string } = styles.neutralText;
 
-  // Ang banggaan ang nauuna sa lahat: naghihintay ito ng pasiya ng tao, at
-  // hindi ito matutuloy gaano man katagal hintayin.
-  if (counts.conflicts > 0) {
+  // Ang berdeng tagumpay ay nauuna lang kapag wala nang natitira — kung may
+  // naghihintay pa, iyon ang dapat makita, hindi ang natapos na.
+  if (celebrating > 0 && counts.total === 0 && !running) {
+    icon = 'checkmark-circle';
+    label = `${celebrating} sent`;
+    tone = styles.success;
+    textTone = styles.successText;
+  } else if (counts.conflicts > 0) {
     icon = 'git-compare-outline';
     label = `${counts.conflicts} needs your decision`;
     tone = styles.danger;
@@ -103,6 +157,12 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 0.2,
+  },
+  success: {
+    backgroundColor: Colors.primaryLight,
+  },
+  successText: {
+    color: Colors.primary,
   },
   neutral: {
     backgroundColor: Colors.warningLight,

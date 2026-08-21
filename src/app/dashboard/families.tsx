@@ -2,15 +2,17 @@ import { useMemo } from 'react';
 
 import type { FilterGroup } from '@/components/filter-bar';
 import { RecordListScreen, type RecordItem } from '@/components/record-list-screen';
-import { choicesFrom, matchesById } from '@/features/registration/list-filters';
+import { barangayGroup, choicesFrom, matchesById } from '@/features/registration/list-filters';
 import { useFormSources } from '@/features/registration/use-form-sources';
 import { useRecordList } from '@/features/registration/use-record-list';
+import { useProfile } from '@/lib/use-profile';
 import { CacheKey } from '@/lib/db';
 import { listFamiliesFull, type FamilySummary, type ListFilters } from '@/lib/api';
 
 /** Nasa labas ng component para hindi magbago ang pagkakakilanlan kada render. */
 function matchesFamily(item: FamilySummary, filters: ListFilters): boolean {
   return matchesById(item as unknown as Record<string, unknown>, filters, [
+    'barangay_id',
     'family_type_id',
     'income_level_id',
   ]);
@@ -25,11 +27,21 @@ export default function FamiliesScreen() {
   );
 
   const { sources } = useFormSources();
+  const profile = useProfile();
+  // Naka-memo: kung bagong array ito kada render, wala nang silbi ang
+  // useMemo sa ibaba at muling gagawa ng hanay sa bawat pindot.
+  const choices = useMemo(
+    () => profile?.barangays.map((b) => ({ id: b.id, name: b.name.trim() })) ?? [],
+    [profile]
+  );
 
   const setFilter = list.setFilter;
 
   const filters = useMemo<FilterGroup[]>(
     () => [
+      ...barangayGroup(choices, list.filters.barangay_id ?? null, (value) =>
+        setFilter('barangay_id', value)
+      ),
       {
         key: 'family_type_id',
         label: 'Family type',
@@ -45,7 +57,7 @@ export default function FamiliesScreen() {
         options: choicesFrom(sources.options, 'income_level', 'All levels'),
       },
     ],
-    [list.filters, setFilter, sources.options]
+    [list.filters, setFilter, sources.options, choices]
   );
 
   const items = useMemo<RecordItem[]>(

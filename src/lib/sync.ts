@@ -11,6 +11,7 @@ import {
   updateResident,
 } from '@/lib/api';
 import { isDeviceOnline } from '@/lib/connectivity';
+import { recordSynced } from '@/lib/sync-history';
 import { warmOfflineData } from '@/lib/warm-offline-data';
 import {
   counts,
@@ -90,11 +91,25 @@ type Listener = (state: SyncState) => void;
 export type SyncState = {
   running: boolean;
   counts: OutboxCounts;
+  /**
+   * Ilan ang naipadala sa katatapos lang na pagsubok.
+   *
+   * DITO GALING ANG PATUNAY NG TAGUMPAY. Kung wala nito, ang tanging
+   * nakikita ng user ay ang paglaho ng laman ng pila — kaparehong hitsura ng
+   * talang tahimik na nawala. Ang bilang na ito ang nagpapaiba sa dalawa.
+   */
+  justSynced: number;
+  /** Kailan huling may naipadala. Null kung wala pa sa buhay ng app na ito. */
+  lastSyncAt: Date | null;
 };
 
 let running = false;
 let listeners: Listener[] = [];
 let lastCounts: OutboxCounts = { pending: 0, syncing: 0, needsFix: 0, conflicts: 0, total: 0 };
+
+/** Bilang ng naipadala sa kasalukuyan o katatapos na drain. */
+let justSynced = 0;
+let lastSyncAt: Date | null = null;
 
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let retryDelay = FIRST_RETRY_MS;
@@ -121,7 +136,7 @@ function cancelRetry() {
 
 export function subscribe(listener: Listener): () => void {
   listeners.push(listener);
-  listener({ running, counts: lastCounts });
+  listener({ running, counts: lastCounts, justSynced, lastSyncAt });
 
   return () => {
     listeners = listeners.filter((item) => item !== listener);
@@ -130,7 +145,9 @@ export function subscribe(listener: Listener): () => void {
 
 async function publish() {
   lastCounts = await counts();
-  listeners.forEach((listener) => listener({ running, counts: lastCounts }));
+  listeners.forEach((listener) =>
+    listener({ running, counts: lastCounts, justSynced, lastSyncAt })
+  );
 }
 
 export async function refresh() {
@@ -146,6 +163,8 @@ export async function drain(): Promise<void> {
   if (running) return;
 
   running = true;
+  // Bagong pagsubok, bagong bilang — hindi dala ang tagumpay ng nakaraan.
+  justSynced = 0;
   await publish();
 
   try {
@@ -201,7 +220,22 @@ export async function drain(): Promise<void> {
 
         // Tagumpay — kasama ang kaso ng "naipadala na dati", dahil 200 rin
         // ang isinasagot ng server doon.
+        //
+        // Ang talaan muna bago ang pagbura: kung babaligtarin, may sandaling
+        // wala ito sa pila at wala rin sa talaan — at kung doon mamatay ang
+        // app, mawawalan ng bakas ang talang naipadala naman talaga.
+        await recordSynced({
+          uuid: item.uuid,
+          type: item.type,
+          label: item.label,
+          action: item.recordId ? 'updated' : 'created',
+          recordId: item.recordId,
+        });
+
         await remove(item.uuid);
+
+        justSynced += 1;
+        lastSyncAt = new Date();
 
         // Gumagana pala ang koneksyon — ibalik sa maikling pagitan para
         // mabilis maabot ang natitira.

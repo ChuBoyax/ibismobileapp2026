@@ -7,8 +7,10 @@ import { buildPayload } from '@/features/registration/build-payload';
 import { buildValues } from '@/features/registration/build-values';
 import { residentSteps } from '@/features/registration/resident-form';
 import { saveRecord } from '@/features/registration/save-record';
+import { withBarangay } from '@/features/registration/barangay-step';
 import { useFormSources } from '@/features/registration/use-form-sources';
 import { useRecordForm } from '@/features/registration/use-record-form';
+import { useProfile } from '@/lib/use-profile';
 
 const SAVED = 'The resident is now in the barangay registry.';
 const UPDATED = 'The changes are now in the barangay registry.';
@@ -20,10 +22,13 @@ export default function ResidentFormScreen() {
     families: true,
   });
 
+  const profile = useProfile();
   const form = useRecordForm('resident');
   const [message, setMessage] = useState(SAVED);
 
-  const steps = useMemo(() => residentSteps(sources), [sources]);
+  // Ang tanong na "aling barangay" ay idinaragdag lang kapag may pagpipilian.
+  // Tingnan ang withBarangay para sa dahilan kung bakit nasa umpisa ito.
+  const steps = useMemo(() => withBarangay(residentSteps(sources), profile), [sources, profile]);
 
   // Ang naka-queue nang sagot ang nauuna sa laman ng server: iyon ang huling
   // ipinasok ng gumagamit, at iyon ang inaasahan niyang makita pagbalik.
