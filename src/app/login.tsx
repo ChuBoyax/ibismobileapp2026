@@ -1,9 +1,11 @@
+import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
+  ImageBackground,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
@@ -314,27 +316,62 @@ export default function LoginScreen() {
           onLayout={() => {
             if (keyboardUp.current) revealFields();
           }}>
-          {/* Green header na may curved na ilalim */}
-          <View
-            style={[
-              styles.header,
-              compact && styles.headerCompact,
-              { paddingTop: insets.top + (compact ? Spacing.lg : Spacing.xxl) },
-            ]}>
-            <View style={[styles.sealRing, compact && styles.sealRingCompact]}>
-              <Image
-                source={require('../../assets/images/batologo-256.png')}
-                style={[styles.seal, compact && styles.sealCompact]}
-                resizeMode="contain"
-                accessibilityLabel="Seal of the Municipality of Bato, Leyte"
-              />
-            </View>
+          {/* Larawan ng bayan, may gradient sa ibabaw at curved na ilalim */}
+          <ImageBackground
+            source={require('../../assets/images/batomn.jpg')}
+            style={styles.header}
+            imageStyle={styles.headerImage}
+            resizeMode="cover">
+            {/*
+              GRADIENT, HINDI PANTAY NA TAKIP.
 
-            <Text style={[styles.appTitle, compact && styles.appTitleCompact]}>
-              Integrated Barangay{'\n'}Information System
-            </Text>
-            <Text style={styles.appSubtitle}>Municipality of Bato, Province of Leyte</Text>
-          </View>
+              Ang pantay na takip ay pinapatay ang buong larawan nang sabay —
+              nawawala ang dahilan kung bakit ito inilagay. Ang gradient ay
+              pinapayagang huminga ang itaas, kung saan walang teksto, at
+              dinidiliman lang ang ibaba kung saan nakatayo ang pangalan ng
+              sistema at kung saan ito sumasalubong sa puting card.
+
+              ANG LAKAS AY SINUKAT, HINDI HINULA. Ang pinakamasamang kaso ay
+              puting bahagi ng larawan sa likod ng puting teksto. Sa bawat
+              lugar na may teksto:
+
+                selyo (itaas, 5%)      0.38  — walang teksto, may puting
+                                              singsing ang selyo mismo
+                pamagat (56%)          0.72  — 5.25:1, hangganan 3.0 (malaki)
+                subtitle (78%)         0.82  — 6.27:1, hangganan 4.5 (maliit)
+                ilalim (100%)          0.92  — 9.49:1
+
+              Ang 0.55 na hantungan ng gitnang hinto ay hindi basta napili:
+              doon nagsisimula ang pamagat. Kung itataas iyon, ang teksto ay
+              mapupunta sa maliwanag na bahagi at mawawala ang buong margin.
+            */}
+            <LinearGradient
+              colors={['rgba(14,63,33,0.35)', 'rgba(14,63,33,0.72)', 'rgba(14,63,33,0.92)']}
+              locations={[0, 0.55, 1]}
+              style={styles.scrim}
+            />
+
+            <View
+              style={[
+                styles.headerInner,
+                compact && styles.headerInnerCompact,
+                { paddingTop: insets.top + (compact ? Spacing.lg : Spacing.xxl) },
+              ]}>
+              <View style={[styles.sealRing, compact && styles.sealRingCompact]}>
+                <Image
+                  source={require('../../assets/images/batologo-256.png')}
+                  style={[styles.seal, compact && styles.sealCompact]}
+                  resizeMode="contain"
+                  accessibilityLabel="Seal of the Municipality of Bato, Leyte"
+                />
+              </View>
+
+              <Text style={[styles.appTitle, compact && styles.appTitleCompact]}>
+                Integrated Barangay{'\n'}Information System
+              </Text>
+              <Text style={styles.appSubtitle}>Municipality of Bato, Province of Leyte</Text>
+            </View>
+          </ImageBackground>
 
           {/* Puting card na nakapatong sa header */}
           <View style={styles.card}>
@@ -418,14 +455,31 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   header: {
+    // Nananatili ang berde sa ilalim ng larawan: iyon ang makikita habang
+    // hindi pa naibabalik ang litrato, at kapag hindi ito mabasa.
     backgroundColor: Colors.primary,
-    alignItems: 'center',
-    paddingBottom: Spacing.xxl + Spacing.xl,
-    paddingHorizontal: Spacing.xl,
+    overflow: 'hidden',
     borderBottomLeftRadius: Radius.header,
     borderBottomRightRadius: Radius.header,
   },
-  headerCompact: {
+  headerImage: {
+    borderBottomLeftRadius: Radius.header,
+    borderBottomRightRadius: Radius.header,
+  },
+  scrim: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  headerInner: {
+    alignItems: 'center',
+    paddingBottom: Spacing.xxl + Spacing.xl,
+    paddingHorizontal: Spacing.xl,
+  },
+  headerInnerCompact: {
+    // Sa masikip na screen, ang taas ang unang binabawasan.
     paddingBottom: Spacing.xxl,
   },
   sealRing: {

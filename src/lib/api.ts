@@ -360,10 +360,19 @@ export async function updatePassword(
 }
 
 /** Binubura ang token sa server. Hindi nagpapasabog kapag nabigo. */
+/**
+ * Binabawi ang token sa server.
+ *
+ * MAIKLI ANG HINIHINTAY, at sinasadya iyon. Ang pag-alis ay pasiya nang
+ * nagawa — hindi ito dapat maantala ng server. Sa labinlimang segundong
+ * karaniwan, ang taong walang signal ay nakatunganga nang ganoon katagal
+ * bago pa siya makalabas, para sa tawag na hindi naman mahalaga kung
+ * mabibigo: itinatapon din naman natin ang token dito sa cellphone.
+ */
 export async function logout() {
   try {
     const token = await getToken();
-    if (token) await request('/logout', { method: 'POST', token });
+    if (token) await request('/logout', { method: 'POST', token, timeout: 4000 });
   } catch {
     // Offline man o expired na ang token, tuloy pa rin ang lokal na logout.
   }
