@@ -11,6 +11,7 @@ import {
   reports,
   type FullListPage,
 } from '@/lib/api';
+import { backfillRecords } from '@/features/registration/backfill-records';
 import { CacheKey, putCache, recordCacheKey, reportCacheKey } from '@/lib/db';
 import type { OutboxType } from '@/lib/outbox';
 
@@ -67,13 +68,32 @@ async function warmScreens(): Promise<void> {
 async function warmList<T>(type: OutboxType, request: Promise<FullListPage<T>>) {
   const page = await request;
 
-  await Promise.all(
-    (page.records ?? []).map((record) =>
-      typeof record.id === 'number'
-        ? putCache(recordCacheKey(type, record.id), record)
-        : Promise.resolve()
-    )
-  );
+  if (page.records) {
+    await Promise.all(
+      page.records.map((record) =>
+        typeof record.id === 'number'
+          ? putCache(recordCacheKey(type, record.id), record)
+          : Promise.resolve()
+      )
+    );
+
+    return toList(page);
+  }
+
+  /*
+    HINDI ISINAMA NG SERVER ANG BUONG TALA.
+
+    Mas luma ang naka-deploy kaysa sa app, kaya binalewala nito ang hiling na
+    "full=1". Kung dito tayo titigil, ang buong pag-init ay magmumukhang
+    matagumpay — may listahan naman — pero walang mabubuksan sa form kapag
+    nawala ang signal. Kinukuha na lang natin isa-isa; tingnan ang
+    backfillRecords para sa mga pagpipigil.
+  */
+  const ids = page.data
+    .map((item) => (item as { id?: unknown }).id)
+    .filter((value): value is number => typeof value === 'number');
+
+  await backfillRecords(type, ids);
 
   return toList(page);
 }
