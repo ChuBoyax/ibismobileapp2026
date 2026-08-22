@@ -2,6 +2,7 @@ import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { FullListPage, ListFilters } from '@/lib/api';
+import { backfillRecords } from './backfill-records';
 import { getCache, putCache, recordCacheKey } from '@/lib/db';
 import type { OutboxType } from '@/lib/outbox';
 
@@ -144,6 +145,23 @@ export function useRecordList<T>(
               putCache(recordCacheKey(recordType, record.id), record);
             }
           }
+        } else if (recordType) {
+          /*
+            WALANG IBINIGAY NA BUONG TALA ANG SERVER.
+
+            Nangyayari ito kapag mas luma ang naka-deploy kaysa sa app —
+            tahimik nitong binabalewala ang hiling na "full=1". Ang listahan
+            ay gumagana pa rin, kaya walang senyas na may mali; sa bundok lang
+            ito lalabas, kung saan huli na ang lahat.
+
+            Kaya tayo na ang kukuha, isa-isa at sa likod. Tingnan ang
+            backfillRecords para sa mga pagpipigil.
+          */
+          const ids = result.data
+            .map((item) => (item as { id?: unknown }).id)
+            .filter((value): value is number => typeof value === 'number');
+
+          void backfillRecords(recordType, ids);
         }
       } catch (err) {
         if (id !== requestId.current) return;
