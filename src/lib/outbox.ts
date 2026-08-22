@@ -233,12 +233,44 @@ export async function enqueue(input: {
   Ang pagbabalik ng walang laman ay mas tapat: makikita ng user ang app na may
   kulang na impormasyon, hindi ang app na hindi tumutugon.
 */
-export async function list(): Promise<OutboxItem[]> {
+/**
+ * Ang listahan nang walang payload.
+ *
+ * BAKIT HIWALAY ITO SA `list()`. Bitbit ng bawat hilera ang buong payload at
+ * form values bilang JSON — libo-libong karakter kada tala kapag may repeater
+ * at kalakip na larawan. Ang Sync screen ay hindi humahawak ng alinman sa
+ * dalawa: pangalan, kalagayan at dahilan lang ang ipinapakita nito.
+ *
+ * Sa sampung tala, walang mapapansing pagkakaiba. Sa isang daan na binabasang
+ * muli sa bawat pag-usad ng sync, ito ang pagitan ng listahang gumagalaw at ng
+ * screen na nakapako habang tumatakbo ang pagpapadala.
+ */
+export type OutboxSummary = Omit<OutboxItem, 'payload' | 'formValues'>;
+
+type SummaryRow = Omit<Row, 'payload' | 'form_values'>;
+
+export async function listSummaries(): Promise<OutboxSummary[]> {
   try {
     const db = await getDatabase();
-    const rows = await db.getAllAsync<Row>('SELECT * FROM outbox ORDER BY created_at ASC');
+    const rows = await db.getAllAsync<SummaryRow>(
+      `SELECT uuid, type, label, status, attempts, last_error, record_id,
+              expected_updated_at, created_at, updated_at
+         FROM outbox
+        ORDER BY created_at ASC`
+    );
 
-    return rows.map(toItem);
+    return rows.map((row) => ({
+      uuid: row.uuid,
+      type: row.type as OutboxType,
+      label: row.label,
+      status: row.status as OutboxStatus,
+      attempts: row.attempts,
+      lastError: row.last_error,
+      recordId: row.record_id ?? null,
+      expectedUpdatedAt: row.expected_updated_at ?? null,
+      createdAt: new Date(row.created_at),
+      updatedAt: new Date(row.updated_at),
+    }));
   } catch {
     return [];
   }

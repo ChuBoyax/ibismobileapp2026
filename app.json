@@ -17,7 +17,8 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.laxsnorxx.ibismobileapp"
     },
     "web": {
       "output": "static",
@@ -42,7 +43,11 @@
       "reactCompiler": true
     },
     "extra": {
-      "apiBaseUrl": "http://192.168.0.103:8000"
+      "apiBaseUrl": "https://ibis.lgubatoleyte.gov.ph",
+      "router": {},
+      "eas": {
+        "projectId": "7e174968-ab2a-4ff5-a979-8e281c83cf8f"
+      }
     }
   }
 }

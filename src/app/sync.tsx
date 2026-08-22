@@ -1,15 +1,21 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { memo, useCallback, useMemo, useState } from 'react';
+import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { RequireAuth } from '@/components/require-auth';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '@/constants/theme';
 import { relativeTime } from '@/lib/format';
 import { goBack } from '@/lib/navigation';
-import { list, overrideConflict, remove, type OutboxItem, type OutboxType } from '@/lib/outbox';
+import {
+  listSummaries,
+  overrideConflict,
+  remove,
+  type OutboxSummary,
+  type OutboxType,
+} from '@/lib/outbox';
 import { drain, subscribe } from '@/lib/sync';
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
@@ -35,14 +41,52 @@ export default function GuardedSyncScreen() {
   );
 }
 
+type Group = 'conflict' | 'needsFix' | 'waiting';
+
+const GROUP_LABEL: Record<Group, string> = {
+  /* Sariling pangkat ang conflict at hindi kasama sa "needs fixing": walang
+     maling datos doon. Ang tanong ay kung kaninong bersyon ang mananaig — at
+     tao lang ang makasasagot niyan. */
+  conflict: 'CHANGED BY SOMEONE ELSE',
+  needsFix: 'NEEDS FIXING',
+  waiting: 'WAITING TO SEND',
+};
+
+/**
+ * Isang patag na listahan ng pamagat at hilera.
+ *
+ * PINATAG PARA MAI-VIRTUALIZE. Dati'y tatlong nakapugad na `map` ito sa loob
+ * ng isang `ScrollView`, kaya nakabuo ng hilera ang BAWAT tala sa pila kahit
+ * ang nakikita lang ng mata ay anim. Sa isang daang naghihintay na tala — ang
+ * mismong dahilan kung bakit may screen na ito — daan-daang view ang nabubuo,
+ * at nagagawa itong muli sa tuwing may umuusad sa sync.
+ *
+ * Ang `FlatList` ay hindi tumatanggap ng pugad, kaya ang pangkat at pamagat ay
+ * ginagawang magkakasunod na entry. Dala ng bawat hilera kung siya ang una o
+ * huli sa pangkat niya, dahil doon nakasabit ang hugis ng card.
+ */
+type Entry =
+  | { kind: 'header'; key: string; label: string }
+  | {
+      kind: 'row';
+      key: string;
+      item: OutboxSummary;
+      group: Group;
+      first: boolean;
+      last: boolean;
+    };
+
 function SyncScreen() {
   const insets = useSafeAreaInsets();
 
-  const [items, setItems] = useState<OutboxItem[]>([]);
+  const [items, setItems] = useState<OutboxSummary[]>([]);
   const [running, setRunning] = useState(false);
 
   const load = useCallback(async () => {
-    setItems(await list());
+    // Sinasadyang walang payload — tingnan ang `listSummaries`. Ang payload
+    // ang pinakamabigat na bahagi ng bawat hilera at wala namang ginagamit
+    // dito ang screen, gayong sa bawat pag-usad ng sync ito binabasang muli.
+    setItems(await listSummaries());
   }, []);
 
   useFocusEffect(
@@ -66,51 +110,114 @@ function SyncScreen() {
     }, [load])
   );
 
-  function confirmDiscard(item: OutboxItem) {
-    Alert.alert(
-      'Discard this record?',
-      `${item.label ?? TYPE_LABEL[item.type]} will be deleted from this device and never sent. This cannot be undone.`,
-      [
-        { text: 'Keep', style: 'cancel' },
-        {
-          text: 'Discard',
-          style: 'destructive',
-          onPress: async () => {
-            await remove(item.uuid);
-            await load();
+  const confirmDiscard = useCallback(
+    (item: OutboxSummary) => {
+      Alert.alert(
+        'Discard this record?',
+        `${item.label ?? TYPE_LABEL[item.type]} will be deleted from this device and never sent. This cannot be undone.`,
+        [
+          { text: 'Keep', style: 'cancel' },
+          {
+            text: 'Discard',
+            style: 'destructive',
+            onPress: async () => {
+              await remove(item.uuid);
+              await load();
+            },
           },
-        },
-      ]
-    );
-  }
+        ]
+      );
+    },
+    [load]
+  );
 
   /**
    * Sinasadyang pagpapasiya: ang bersyon sa cellphone ang mananaig.
    * Ipinapakita muna ang sasapitin — nakabura ito ng trabaho ng iba.
    */
-  function confirmOverride(item: OutboxItem) {
-    Alert.alert(
-      'Keep your version?',
-      'The changes made by the other person will be replaced by yours. This cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Keep mine',
-          style: 'destructive',
-          onPress: async () => {
-            await overrideConflict(item.uuid);
-            await load();
-            void drain();
+  const confirmOverride = useCallback(
+    (item: OutboxSummary) => {
+      Alert.alert(
+        'Keep your version?',
+        'The changes made by the other person will be replaced by yours. This cannot be undone.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Keep mine',
+            style: 'destructive',
+            onPress: async () => {
+              await overrideConflict(item.uuid);
+              await load();
+              void drain();
+            },
           },
-        },
-      ]
-    );
-  }
+        ]
+      );
+    },
+    [load]
+  );
 
-  const conflicts = items.filter((item) => item.status === 'conflict');
-  const needsFix = items.filter((item) => item.status === 'needs_fix');
-  const waiting = items.filter(
+  const openFix = useCallback((item: OutboxSummary) => {
+    router.push(`/registration/${item.type}?draft=${item.uuid}` as never);
+  }, []);
+
+  const waitingCount = items.filter(
     (item) => item.status !== 'needs_fix' && item.status !== 'conflict'
+  ).length;
+
+  const entries = useMemo(() => {
+    const groups: { group: Group; rows: OutboxSummary[] }[] = [
+      { group: 'conflict', rows: items.filter((item) => item.status === 'conflict') },
+      { group: 'needsFix', rows: items.filter((item) => item.status === 'needs_fix') },
+      {
+        group: 'waiting',
+        rows: items.filter(
+          (item) => item.status !== 'needs_fix' && item.status !== 'conflict'
+        ),
+      },
+    ];
+
+    const result: Entry[] = [];
+
+    for (const { group, rows } of groups) {
+      if (rows.length === 0) continue;
+
+      result.push({ kind: 'header', key: `header-${group}`, label: GROUP_LABEL[group] });
+
+      rows.forEach((item, index) => {
+        result.push({
+          kind: 'row',
+          key: item.uuid,
+          item,
+          group,
+          first: index === 0,
+          last: index === rows.length - 1,
+        });
+      });
+    }
+
+    return result;
+  }, [items]);
+
+  const renderItem = useCallback(
+    ({ item: entry }: { item: Entry }) => {
+      if (entry.kind === 'header') {
+        return <Text style={styles.groupLabel}>{entry.label}</Text>;
+      }
+
+      return (
+        <Row
+          item={entry.item}
+          first={entry.first}
+          last={entry.last}
+          onFix={entry.group === 'waiting' ? undefined : openFix}
+          fixLabel={entry.group === 'conflict' ? 'Review' : 'Fix'}
+          onOverride={entry.group === 'conflict' ? confirmOverride : undefined}
+          onDiscard={confirmDiscard}
+        />
+      );
+    },
+    [openFix, confirmOverride, confirmDiscard]
   );
 
   return (
@@ -136,7 +243,7 @@ function SyncScreen() {
             </Text>
           </View>
 
-          {waiting.length > 0 && (
+          {waitingCount > 0 && (
             <Pressable
               style={({ pressed }) => [styles.retry, pressed && styles.pressed]}
               onPress={() => void drain()}
@@ -148,10 +255,21 @@ function SyncScreen() {
         </View>
       </View>
 
-      <ScrollView
-        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + Spacing.xxl }]}
-        showsVerticalScrollIndicator={false}>
-        {items.length === 0 ? (
+      <FlatList
+        data={entries}
+        keyExtractor={(entry) => entry.key}
+        renderItem={renderItem}
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: insets.bottom + Spacing.xxl },
+          entries.length === 0 && styles.emptyContent,
+        ]}
+        showsVerticalScrollIndicator={false}
+        // Sapat para mapuno ang unang tanawin nang hindi binubuo ang lahat.
+        initialNumToRender={12}
+        maxToRenderPerBatch={12}
+        windowSize={7}
+        ListEmptyComponent={
           <View style={styles.empty}>
             <View style={styles.emptyIcon}>
               <Ionicons name="cloud-done-outline" size={34} color={Colors.primary} />
@@ -161,92 +279,45 @@ function SyncScreen() {
               Records you save without a connection will wait here until the signal comes back.
             </Text>
           </View>
-        ) : (
-          <>
-            {conflicts.length > 0 && (
-              <>
-                {/* Sariling pangkat ito at hindi kasama sa "needs fixing":
-                    walang maling datos dito. Ang tanong ay kung kaninong
-                    bersyon ang mananaig — at tao lang ang makasasagot niyan. */}
-                <Text style={styles.groupLabel}>CHANGED BY SOMEONE ELSE</Text>
-                <View style={styles.list}>
-                  {conflicts.map((item, index) => (
-                    <Row
-                      key={item.uuid}
-                      item={item}
-                      last={index === conflicts.length - 1}
-                      onFix={() =>
-                        router.push(`/registration/${item.type}?draft=${item.uuid}` as never)
-                      }
-                      fixLabel="Review"
-                      onOverride={() => confirmOverride(item)}
-                      onDiscard={() => confirmDiscard(item)}
-                    />
-                  ))}
-                </View>
-              </>
-            )}
-
-            {needsFix.length > 0 && (
-              <>
-                <Text style={styles.groupLabel}>NEEDS FIXING</Text>
-                <View style={styles.list}>
-                  {needsFix.map((item, index) => (
-                    <Row
-                      key={item.uuid}
-                      item={item}
-                      last={index === needsFix.length - 1}
-                      onFix={() =>
-                        router.push(`/registration/${item.type}?draft=${item.uuid}` as never)
-                      }
-                      onDiscard={() => confirmDiscard(item)}
-                    />
-                  ))}
-                </View>
-              </>
-            )}
-
-            {waiting.length > 0 && (
-              <>
-                <Text style={styles.groupLabel}>WAITING TO SEND</Text>
-                <View style={styles.list}>
-                  {waiting.map((item, index) => (
-                    <Row
-                      key={item.uuid}
-                      item={item}
-                      last={index === waiting.length - 1}
-                      onDiscard={() => confirmDiscard(item)}
-                    />
-                  ))}
-                </View>
-              </>
-            )}
-          </>
-        )}
-      </ScrollView>
+        }
+      />
     </View>
   );
 }
 
-function Row({
+/**
+ * NAKA-MEMO ANG HILERA, AT MAY SARILING PAGHAHAMBING.
+ *
+ * Bagong bagay ang nabubuo sa bawat pagbabasa ng listahan, kaya kahit walang
+ * nagbago sa isang tala ay iba na ang pagkakakilanlan nito at magre-render
+ * muli ang buong hilera. Sa isang daang tala na dumadaan sa isa-isang
+ * pagpapadala, iyon ay libo-libong render na walang ipinagbago sa mata.
+ *
+ * Kaya inihahambing ang mga pinagmumulan ng laman, hindi ang bagay mismo.
+ */
+type RowProps = {
+  item: OutboxSummary;
+  first: boolean;
+  last: boolean;
+  onFix?: (item: OutboxSummary) => void;
+  fixLabel?: string;
+  onOverride?: (item: OutboxSummary) => void;
+  onDiscard: (item: OutboxSummary) => void;
+};
+
+const Row = memo(function Row({
   item,
+  first,
   last,
   onFix,
   fixLabel = 'Fix',
   onOverride,
   onDiscard,
-}: {
-  item: OutboxItem;
-  last: boolean;
-  onFix?: () => void;
-  fixLabel?: string;
-  onOverride?: () => void;
-  onDiscard: () => void;
-}) {
+}: RowProps) {
   const broken = item.status === 'needs_fix' || item.status === 'conflict';
 
   return (
-    <View style={[styles.row, last && styles.lastRow]}>
+    <View style={[styles.row, first && styles.firstRow, last && styles.lastRow]}>
       <View style={styles.rowTop}>
         <View style={[styles.icon, broken ? styles.iconDanger : styles.iconNeutral]}>
           <Ionicons
@@ -286,7 +357,7 @@ function Row({
         {!!onFix && (
           <Pressable
             style={({ pressed }) => [styles.action, styles.fix, pressed && styles.pressed]}
-            onPress={onFix}
+            onPress={() => onFix(item)}
             accessibilityRole="button">
             <Ionicons name="create-outline" size={15} color={Colors.onPrimary} />
             <Text style={styles.fixText}>{fixLabel}</Text>
@@ -296,7 +367,7 @@ function Row({
         {!!onOverride && (
           <Pressable
             style={({ pressed }) => [styles.action, styles.override, pressed && styles.pressed]}
-            onPress={onOverride}
+            onPress={() => onOverride(item)}
             accessibilityRole="button">
             <Ionicons name="cloud-upload-outline" size={15} color={Colors.text} />
             <Text style={styles.overrideText}>Keep mine</Text>
@@ -305,7 +376,7 @@ function Row({
 
         <Pressable
           style={({ pressed }) => [styles.action, styles.discard, pressed && styles.pressed]}
-          onPress={onDiscard}
+          onPress={() => onDiscard(item)}
           accessibilityRole="button">
           <Ionicons name="trash-outline" size={15} color={Colors.danger} />
           <Text style={styles.discardText}>Discard</Text>
@@ -313,7 +384,22 @@ function Row({
       </View>
     </View>
   );
-}
+},
+(prev, next) =>
+  prev.first === next.first &&
+  prev.last === next.last &&
+  prev.fixLabel === next.fixLabel &&
+  prev.onFix === next.onFix &&
+  prev.onOverride === next.onOverride &&
+  prev.onDiscard === next.onDiscard &&
+  prev.item.uuid === next.item.uuid &&
+  prev.item.type === next.item.type &&
+  prev.item.label === next.item.label &&
+  prev.item.status === next.item.status &&
+  prev.item.attempts === next.item.attempts &&
+  prev.item.lastError === next.item.lastError &&
+  prev.item.recordId === next.item.recordId &&
+  prev.item.createdAt.getTime() === next.item.createdAt.getTime());
 
 const styles = StyleSheet.create({
   screen: {
@@ -371,6 +457,9 @@ const styles = StyleSheet.create({
   content: {
     padding: Spacing.xl,
   },
+  emptyContent: {
+    flexGrow: 1,
+  },
   groupLabel: {
     marginTop: Spacing.lg,
     marginBottom: Spacing.md,
@@ -380,19 +469,32 @@ const styles = StyleSheet.create({
     color: Colors.muted,
     letterSpacing: 1,
   },
-  list: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.lg,
-    paddingHorizontal: Spacing.lg,
-    ...Shadow.card,
-  },
+  /*
+    ANG CARD AY GAWA NG MGA HILERA MISMO, HINDI NG BALOT NA VIEW.
+
+    Kailangan nito ng virtualization: ang mga hilera ay magkakapatid na sa
+    FlatList at wala nang iisang magulang na maaaring bigyan ng bilog na gilid.
+    Kaya ang unang hilera ang may dalang itaas na kurba at ang huli ang may
+    ibaba — at dahil magkadikit at opaque ang mga ito, ang anino ng bawat
+    hilera ay natatakpan ng kasunod, at ang natitirang nakikita ay ang anino ng
+    buong pangkat.
+  */
   row: {
+    backgroundColor: Colors.surface,
+    paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.lg,
     borderBottomWidth: 1,
     borderBottomColor: Colors.divider,
+    ...Shadow.card,
+  },
+  firstRow: {
+    borderTopLeftRadius: Radius.lg,
+    borderTopRightRadius: Radius.lg,
   },
   lastRow: {
     borderBottomWidth: 0,
+    borderBottomLeftRadius: Radius.lg,
+    borderBottomRightRadius: Radius.lg,
   },
   rowTop: {
     flexDirection: 'row',

@@ -40,6 +40,7 @@ export function FieldRenderer({ field, values, error, onChange }: FieldRendererP
     case 'image':
       return (
         <ImageField
+          name={field.name}
           label={field.label}
           hint={field.hint}
           required={required}

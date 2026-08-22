@@ -36,14 +36,18 @@ type RecordListScreenProps = {
   createHref: Href;
   createLabel: string;
   /*
-    Ruta ng parehong form, pero para sa umiiral nang tala. Ang id ay
-    idinurugtong dito kapag pinindot ang isang card.
+    Ruta ng buod ng isang umiiral nang tala. Ang id ay idinurugtong dito kapag
+    pinindot ang isang card.
+
+    BUOD ANG BINUBUKSAN NITO, HINDI ANG FORM. Ang pinakakaraniwang dahilan ng
+    pagpindot ay tingnan ang tala, hindi baguhin — at ang stepper ay nasa likod
+    pa ng pindutang "Edit" doon.
 
     ANG BUONG CARD ANG PINDUTAN, hindi isang maliit na icon sa gilid. Ang
     chevron sa dulo ay matagal nang nakaguhit doon — nangako na iyon ng
     pagbukas kahit wala pang nangyayari.
   */
-  editHref: (id: string) => Href;
+  openHref: (id: string) => Href;
   items: RecordItem[];
   total: number;
   loading: boolean;
@@ -66,7 +70,7 @@ export function RecordListScreen({
   icon,
   createHref,
   createLabel,
-  editHref,
+  openHref,
   items,
   total,
   loading,
@@ -177,7 +181,7 @@ export function RecordListScreen({
                 .damping(18)}>
               <Pressable
                 style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
-                onPress={() => router.push(editHref(item.id))}
+                onPress={() => router.push(openHref(item.id))}
                 accessibilityRole="button"
                 accessibilityLabel={`Open ${item.title}`}>
                 <View style={styles.avatar}>

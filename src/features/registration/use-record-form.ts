@@ -1,6 +1,6 @@
 import { randomUUID } from 'expo-crypto';
-import { useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { FormValues } from '@/components/form/types';
 import { showFamily, showHousehold, showResident, type FullRecord } from '@/lib/api';
@@ -40,9 +40,15 @@ export type RecordFormMode =
  *    pala ang naka-queue — kaya kinukuha rin ang tala para sariwa ang bersyon.
  */
 export function useRecordForm(type: OutboxType) {
-  const params = useLocalSearchParams<{ draft?: string; id?: string }>();
+  const params = useLocalSearchParams<{
+    draft?: string;
+    id?: string;
+    edit?: string;
+    step?: string;
+  }>();
 
   const draftUuid = typeof params.draft === 'string' ? params.draft : null;
+  const wantsEdit = params.edit === '1';
   const paramId = typeof params.id === 'string' ? Number(params.id) : NaN;
   const routeRecordId = Number.isFinite(paramId) && paramId > 0 ? paramId : null;
 
@@ -161,7 +167,52 @@ export function useRecordForm(type: OutboxType) {
 
   const mode: RecordFormMode = draftUuid ? 'fix' : routeRecordId ? 'edit' : 'create';
 
+  /*
+    TINITINGNAN, HINDI BINABAGO.
+
+    Ang pagpindot sa isang tala sa listahan ay nangangahulugang gusto itong
+    makita — hindi baguhin. Ang stepper ay nasa likod ng `edit=1`, na ang
+    pindutang "Edit" lang ang naglalagay.
+
+    Hindi kasama ang `fix`: kapag may naka-queue nang pagbabagong tinutukoy ng
+    `?draft=`, sinadya ng gumagamit na buksan ito para ayusin, kaya diretso na
+    sa form.
+  */
+  const viewing = mode === 'edit' && !wantsEdit;
+
+  /*
+    Sariwa ang buod tuwing babalik dito.
+
+    Mula sa view page pumapasok ang pag-edit, at doon din bumabalik pagkatapos
+    mag-save. Kung hindi muling kukunin, ang unang bagay na makikita ng
+    nag-eencode pagkatapos magpalit ng sagot ay ang lumang sagot.
+  */
+  const firstFocus = useRef(true);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (firstFocus.current) {
+        // Kakakuha lang ng effect sa itaas — walang saysay na ulitin ito.
+        firstFocus.current = false;
+        return;
+      }
+
+      if (viewing) setAttempt((value) => value + 1);
+    }, [viewing])
+  );
+
   return {
+    /** Buod muna; nasa likod ng "Edit" ang labing-isang hakbang. */
+    viewing,
+    /** Ruta ng stepper para sa talang ito, opsyonal na may hakbang. */
+    editHref: (step?: number) =>
+      `/registration/${type}?id=${routeRecordId ?? recordId}&edit=1` +
+      (step === undefined ? '' : `&step=${step}`),
+    /**
+     * Saang hakbang bubukas ang stepper. Ang pagpindot sa isang seksyon ng
+     * view page ay dapat magbukas doon mismo, hindi sa simula ng labing-isa.
+     */
+    initialStep: Number.isFinite(Number(params.step)) ? Math.max(0, Number(params.step)) : 0,
     // ANG PAREHONG UUID ANG GINAGAMIT sa muling pag-save. Kung nakapasok na
     // pala ang unang padala at hindi lang nakarating ang sagot, kikilalanin
     // ito ng server bilang parehong tala at hindi magdodoble.
