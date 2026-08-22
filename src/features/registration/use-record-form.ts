@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FormValues } from '@/components/form/types';
 import { showFamily, showHousehold, showResident, type FullRecord } from '@/lib/api';
 import { getCache, putCache, recordCacheKey } from '@/lib/db';
+import { resolveFormValues } from '@/lib/local-refs';
 import { findByRecord, get, type OutboxType } from '@/lib/outbox';
 
 const SHOW = {
@@ -92,7 +93,14 @@ export function useRecordForm(type: OutboxType) {
       if (!active) return;
 
       if (item) {
-        setDraftValues(item.formValues as FormValues);
+        // Ang tinutukoy nitong sambahayan o pamilya ay maaaring nakarating na
+        // habang naghihintay ito. Tingnan ang `resolveFormValues` — kung hindi
+        // ito itutuwid, blangko ang lalabas na pagpipilian.
+        const values = (await resolveFormValues(item.formValues)) as FormValues;
+
+        if (!active) return;
+
+        setDraftValues(values);
         setExpectedUpdatedAt(item.expectedUpdatedAt);
         setQueuedUuid(item.uuid);
 

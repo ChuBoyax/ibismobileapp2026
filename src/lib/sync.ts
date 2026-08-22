@@ -12,11 +12,13 @@ import {
   updateResident,
 } from '@/lib/api';
 import { isDeviceOnline } from '@/lib/connectivity';
+import { rememberId, resolveRefs } from '@/lib/local-refs';
 import { recordSynced } from '@/lib/sync-history';
 import { warmOfflineData } from '@/lib/warm-offline-data';
 import {
   counts,
   missingPhotos,
+  outboxUuids,
   pending,
   remove,
   setStatus,
@@ -43,7 +45,10 @@ import {
 
 const CREATE: Record<
   OutboxType,
-  (payload: Record<string, unknown>, options?: { timeout?: number }) => Promise<unknown>
+  (
+    payload: Record<string, unknown>,
+    options?: { timeout?: number }
+  ) => Promise<{ data: { id: number } }>
 > = {
   resident: createResident,
   household: createHousehold,
@@ -260,13 +265,22 @@ export async function refresh() {
 type Outcome =
   /** Naipadala na o naitabi na para sa tao. Tuloy ang iba. */
   | 'settled'
+  /**
+   * May tinutukoy itong talang nasa pila pa. Hindi ito pagkakamali at hindi
+   * ito bumibilang na subok — mauuna lang ang tinutukoy, saka ito babalikan.
+   */
+  | 'deferred'
   /** Nawalan ng bisa ang token — walang saysay ang natitira. */
   | 'auth'
   /** Hindi maabot ang server — walang saysay ang natitira. */
   | 'unreachable';
 
 /** Isang tala: mula sa pagsusuri hanggang sa pagtatala ng kinalabasan. */
-async function send(item: OutboxItem): Promise<Outcome> {
+async function send(
+  item: OutboxItem,
+  /** Nasa pila pa ba ang uuid na ito? Dito nakikilala ang naghihintay sa nawawala. */
+  queued: (uuid: string) => boolean
+): Promise<Outcome> {
   if (item.attempts >= MAX_ATTEMPTS) {
     await setStatus(
       item.uuid,
@@ -293,6 +307,40 @@ async function send(item: OutboxItem): Promise<Outcome> {
     return 'settled';
   }
 
+  /*
+    PINAPALITAN ANG PANANDA NG TUNAY NA ID BAGO IPADALA.
+
+    Ang residenteng ginawa sa bahay na walang signal ay maaaring nakatalaga sa
+    sambahayang nasa pila rin. Habang wala pang id ang sambahayan, hindi pa
+    maipapadala ang residente — pero hindi rin ito pagkakamali: kailangan lang
+    munang makarating ang sambahayan. Tingnan ang `resolveRefs`.
+  */
+  const resolution = await resolveRefs(item.payload, queued);
+
+  if (!resolution.ready) {
+    if ('missing' in resolution) {
+      // Itinapon ng gumagamit ang tinutukoy. Walang paghihintay na
+      // makapagbabago nito — kailangan na siyang pumili ng iba.
+      await setStatus(item.uuid, 'needs_fix', {
+        error:
+          'This record points to a household or family that was discarded from the queue. ' +
+          'Tap Fix to choose another one.',
+      });
+
+      return 'settled';
+    }
+
+    // Nasa pila pa ang tinutukoy — ibabalik ito sa susunod na hakbang.
+    // Sinasadyang walang `countAttempt`: walang nabigo rito.
+    await setStatus(item.uuid, 'pending', {
+      error: 'Waiting for the household or family it belongs to.',
+    });
+
+    return 'deferred';
+  }
+
+  const payload = resolution.payload;
+
   await setStatus(item.uuid, 'syncing');
   publish();
 
@@ -304,12 +352,21 @@ async function send(item: OutboxItem): Promise<Outcome> {
       await UPDATE[item.type](
         item.recordId,
         item.expectedUpdatedAt
-          ? { ...item.payload, expected_updated_at: item.expectedUpdatedAt }
-          : item.payload,
+          ? { ...payload, expected_updated_at: item.expectedUpdatedAt }
+          : payload,
         { timeout: SYNC_TIMEOUT_MS }
       );
     } else {
-      await CREATE[item.type](item.payload, { timeout: SYNC_TIMEOUT_MS });
+      const created = await CREATE[item.type](payload, { timeout: SYNC_TIMEOUT_MS });
+
+      // ITINATALA ANG NAGING ID BAGO ANG ANUMANG IBA PA.
+      //
+      // Dito nakasalalay ang mga talang naghihintay pa sa pila: hangga't
+      // hindi nakikilala ang uuid na ito, hindi sila maipapadala. Kung ito ay
+      // ipagpapaliban hanggang matapos ang buong drain, ang residenteng
+      // nakatalaga sa sambahayang ito ay maghihintay pa ng isa pang pagsubok
+      // gayong nariyan na naman ang kailangan niya.
+      await rememberId(item.uuid, item.type, created.data.id);
     }
 
     // Tagumpay — kasama ang kaso ng "naipadala na dati", dahil 200 rin
@@ -405,13 +462,17 @@ export async function drain(): Promise<void> {
     // hindi natin dapat pigilin ang screen ng ibang ginagawa ng may-ari.
     await holdScreenAwake(items.length > 0);
 
-    /** Susunod na kukunin ng sinumang manggagawang bakante. */
-    let next = 0;
     /** Kapag may nakitang dahilan para ihinto lahat, dito ito nakasulat. */
     let halt: 'auth' | 'unreachable' | null = null;
 
+    // Alin ang nasa pila — dito nakikilala ang talang hinihintay pa sa talang
+    // itinapon na. Kinukuha nang minsan lang: ang mawawala rito habang
+    // tumatakbo ay ang mga naipadala na, at kilala naman sila sa id nila.
+    const known = await outboxUuids();
+    const queued = (uuid: string) => known.has(uuid);
+
     /*
-      MAGKAKASABAY NA PADALA.
+      MAGKAKASABAY NA PADALA, PERO SUNOD-SUNOD ANG MAGKAKAUGNAY.
 
       Ang isa-isang padala ay halos puro paghihintay: bawat tala ay may sariling
       handshake, paghihintay sa server, at pagsagot. Habang naghihintay ang isa,
@@ -424,25 +485,49 @@ export async function drain(): Promise<void> {
       pinagkakaagawan ng bawat upload ang parehong makitid na bandwidth at
       nauuwi sa timeout ang lahat nang sabay — mas mabagal pa kaysa sa isa-isa.
 
-      Walang pagkakasunod na sinisira nito. Ang mga tala sa pila ay hindi
-      tumutukoy sa isa't isa: ang mapipili lang na sambahayan o pamilya ay ang
-      nasa server na, kaya walang naghihintay ng ibang tala bago maipadala.
+      PERO HINDI LAHAT AY MALAYANG MAGKASABAY. May mga talang tumutukoy sa
+      isa't isa: ang residenteng ginawa sa bahay na walang signal ay maaaring
+      nakatalaga sa sambahayang nasa pila rin, at kailangan munang makarating
+      ang sambahayan bago magkaroon ng id na maipapadala.
+
+      Kaya ikot-ikot ito. Sa bawat ikot, ipinapadala ang lahat ng handa —
+      magkakasabay, dahil magkakahiwalay naman sila. Ang naghintay ay dinadala
+      sa susunod na ikot, kung saan malamang nakarating na ang hinihintay nila.
+      Kapag walang umusad sa isang buong ikot, wala nang maidudulot ang pag-ulit
+      at doon ito humihinto — nakasulat naman sa bawat isa kung ano ang
+      hinihintay nila.
     */
-    async function worker() {
-      while (!halt) {
-        const item = items[next++];
+    let wave = items;
 
-        if (!item) return;
+    while (wave.length > 0 && !halt) {
+      /** Ang hindi pa handa sa ikot na ito — sila ang susunod na susubukan. */
+      const waiting: OutboxItem[] = [];
+      let next = 0;
 
-        const outcome = await send(item);
+      const worker = async () => {
+        while (!halt) {
+          const item = wave[next++];
 
-        if (outcome !== 'settled') halt = outcome;
-      }
+          if (!item) return;
+
+          const outcome = await send(item, queued);
+
+          if (outcome === 'deferred') waiting.push(item);
+          else if (outcome !== 'settled') halt = outcome;
+        }
+      };
+
+      await Promise.all(
+        Array.from({ length: Math.min(CONCURRENCY, wave.length) }, () => worker())
+      );
+
+      // Walang naipadala at pareho pa rin ang naghihintay — ang natitira ay
+      // magkakahawak sa isa't isa o naghihintay ng talang kailangan pang
+      // ayusin. Hindi ito maaayos ng isa pang ikot.
+      if (waiting.length === wave.length) break;
+
+      wave = waiting;
     }
-
-    await Promise.all(
-      Array.from({ length: Math.min(CONCURRENCY, items.length) }, () => worker())
-    );
 
     // Hihinto ang kusang pag-uulit hanggang may bagong login. Itinatakda ito
     // dito at hindi sa loob ng `send`, para iisa ang lugar na nagpapasiya.

@@ -110,6 +110,29 @@ async function initialise(): Promise<SQLite.SQLiteDatabase> {
     );
 
     CREATE INDEX IF NOT EXISTS sync_history_time_idx ON sync_history (synced_at DESC);
+
+    /*
+      Ang tulay sa pagitan ng uuid na gawa ng cellphone at ng id na gawa ng
+      server.
+
+      BAKIT KAILANGAN. Kapag gumawa ng sambahayan habang walang signal, wala
+      pa itong id — nasa pila pa lang ito, at uuid lang ang pagkakakilanlan.
+      Pero kailangan itong matukoy ng residenteng itatalaga roon, at ang
+      hinihingi ng server ay id. Dito naitatala ang naging id nito nang
+      makarating na, kaya ang mga sumunod na talang naghihintay pa sa pila ay
+      may mapagpapalitan bago sila ipadala.
+
+      HIWALAY ITO SA TALAAN NG NAIPADALA AT SINASADYA IYON. Nabubura ng gumagamit
+      ang talaan ng naipadala ("Clear list") — at kung doon nakasandal ang
+      ugnayan, ang pagpindot niya roon ay puputol sa mga taling hindi pa
+      naipapadala. Ang tulay na ito ay hindi nabubura ng sinuman.
+    */
+    CREATE TABLE IF NOT EXISTS id_map (
+      uuid       TEXT PRIMARY KEY NOT NULL,
+      type       TEXT NOT NULL,
+      record_id  INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    );
   `);
 
   await addOutboxEditColumns(db);

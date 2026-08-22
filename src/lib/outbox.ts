@@ -1,6 +1,7 @@
 import { Directory, File, Paths } from 'expo-file-system';
 
 import { getDatabase } from '@/lib/db';
+import { localRef } from '@/lib/local-refs';
 
 /**
  * Pila ng mga talang hindi pa naipapadala sa server.
@@ -273,6 +274,71 @@ export async function listSummaries(): Promise<OutboxSummary[]> {
     }));
   } catch {
     return [];
+  }
+}
+
+/**
+ * Ang mga bagong talang nasa pila pa, bilang pagpipilian sa form.
+ *
+ * BAKIT KAILANGAN NG PAGPIPILIAN ANG HINDI PA NAIPAPADALA. Ang enumerator na
+ * nasa bahay na walang signal ay gumagawa ng sambahayan, tapos ng mga
+ * naninirahan doon. Kung ang mapagpipilian lang ay ang nasa server na, ang
+ * kagagawa niya lang ay hindi niya matutukoy — kaya mapipilitan siyang
+ * hintayin ang signal, gayong ang buong dahilan ng offline na pag-encode ay
+ * ang hindi paghihintay.
+ *
+ * PAGLIKHA LAMANG ANG ISINASAMA. Ang naka-queue na PAGBABAGO ay may id na at
+ * nasa listahan na ng server — kung isasama pa rito, doble itong lalabas.
+ */
+export async function pendingChoices(
+  type: OutboxType
+): Promise<{ value: string; label: string }[]> {
+  try {
+    const db = await getDatabase();
+
+    const rows = await db.getAllAsync<{ uuid: string; label: string | null }>(
+      `SELECT uuid, label
+         FROM outbox
+        WHERE type = ? AND record_id IS NULL
+        ORDER BY created_at ASC`,
+      type
+    );
+
+    return rows.map((row) => ({
+      value: localRef(row.uuid),
+      // Malinaw na nakasulat na hindi pa ito naipapadala. Kung magkamukha ang
+      // dalawa, ang mapipili ng gumagamit ay hindi na niya mapagkakaiba —
+      // at ang isa roon ay maaaring mawala kung itapon niya ito sa pila.
+      label: `${row.label ?? TYPE_NOUN[type]} · not yet sent`,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+const TYPE_NOUN: Record<OutboxType, string> = {
+  resident: 'New resident',
+  household: 'New household',
+  family: 'New family',
+};
+
+/**
+ * Lahat ng uuid na nasa pila pa, anuman ang kalagayan.
+ *
+ * KASAMA ANG NAGHIHINTAY NG PAG-AAYOS. Dito nakikilala ang talang HINIHINTAY
+ * pa sa talang ITINAPON na — at malayo ang pagitan ng dalawa. Kung ang
+ * batayan ay ang maipapadala pa lang, ang residenteng nakatalaga sa
+ * sambahayang may maling datos ay sasabihing tumutukoy sa wala, gayong
+ * nariyan pa naman iyon at inaayos pa lang.
+ */
+export async function outboxUuids(): Promise<Set<string>> {
+  try {
+    const db = await getDatabase();
+    const rows = await db.getAllAsync<{ uuid: string }>('SELECT uuid FROM outbox');
+
+    return new Set(rows.map((row) => row.uuid));
+  } catch {
+    return new Set();
   }
 }
 
