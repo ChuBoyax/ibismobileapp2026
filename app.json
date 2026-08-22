@@ -41,7 +41,7 @@
         "expo-build-properties",
         {
           "android": {
-            "usesCleartextTraffic": true
+            "usesCleartextTraffic": false
           }
         }
       ]
@@ -51,7 +51,7 @@
       "reactCompiler": true
     },
     "extra": {
-      "apiBaseUrl": "http://192.168.100.166:8000",
+      "apiBaseUrl": "https://ibis.lgubatoleyte.gov.ph",
       "router": {},
       "eas": {
         "projectId": "8058a11d-508b-4ee0-9fe3-3b131692287e"
