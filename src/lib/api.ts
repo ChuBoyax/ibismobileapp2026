@@ -686,6 +686,43 @@ export function showFamily(id: number) {
   return authed<{ data: FullRecord }>(`/families/${id}`);
 }
 
+/* ── Larawan ────────────────────────────────────────────────────────── */
+
+/**
+ * Saan kukunin ang isang naka-upload nang larawan.
+ *
+ * ANG IBINABALIK NG SERVER SA `show` AY PATH, HINDI URL — halimbawa
+ * "resident-photos/abc.jpg". Nasa pribadong `local` na disk ang file: walang
+ * public na URL at hindi ito naaabot ng /storage. Sinasadya iyon, national ID
+ * at sertipiko ng kamatayan ang laman nito.
+ *
+ * Kaya may sariling endpoint ang mga larawan, na dumadaan sa parehong token
+ * at parehong pagsasala ng barangay gaya ng ibang IBIS API. Ang path na hawak
+ * ng app ay pananda lang na MAY larawan — hindi ito kayang buksan nang tuwiran.
+ */
+export function recordPhotoUrl(
+  type: 'resident' | 'household',
+  id: number,
+  field: string
+): string {
+  const collection = type === 'resident' ? 'residents' : 'households';
+
+  return `${serverUrl()}/api/ibis/${collection}/${id}/photos/${field}`;
+}
+
+/**
+ * Ang header na kailangan ng <Image> para makuha ang larawan sa itaas.
+ *
+ * Hindi nagdadala ng Authorization ang <Image> nang kusa — kailangang ibigay
+ * ito kada larawan, kung hindi ay 401 ang sasagutin ng server at blangko ang
+ * lalabas nang walang paliwanag.
+ */
+export async function photoHeaders(): Promise<Record<string, string>> {
+  const token = await getToken();
+
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 /*
   POST ANG GINAGAMIT, HINDI PUT.
 

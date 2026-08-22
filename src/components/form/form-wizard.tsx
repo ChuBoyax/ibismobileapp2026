@@ -20,23 +20,33 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { SummaryCards } from '@/components/summary-cards';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '@/constants/theme';
+import { buildSummary, countFilled } from '@/features/registration/build-summary';
+import {
+  ExistingPhotoProvider,
+  type ExistingPhotos,
+} from '@/features/registration/existing-photos';
 import { goBack } from '@/lib/navigation';
 
 import { FormSection } from './form-section';
-import {
-  isFieldVisible,
-  validateStep,
-  type FieldValue,
-  type FormValues,
-  type StepDef,
-} from './types';
+import { validateStep, type FieldValue, type FormValues, type StepDef } from './types';
 
 type FormWizardProps = {
   title: string;
   subtitle: string;
   steps: StepDef[];
   initialValues?: FormValues;
+  /**
+   * Mga larawang naka-upload na para sa talang ito. Ipinapakita lang — hindi
+   * sila nagiging sagot sa form. Tingnan ang `existingPhotos`.
+   */
+  existingPhotos?: ExistingPhotos;
+  /**
+   * Saang hakbang bubukas. Ginagamit ng view page kapag pinindot ang isang
+   * seksyon: doon mismo bumubukas ang form, hindi sa simula ng labing-isa.
+   */
+  initialStep?: number;
   /** Ipinapakita sa success modal pagkatapos ng huling hakbang. */
   successMessage: string;
   /** Ipinapadala ang tala sa server. Ang pagkabigo ay ipinapakita sa review. */
@@ -56,6 +66,8 @@ export function FormWizard({
   subtitle,
   steps,
   initialValues = {},
+  existingPhotos = {},
+  initialStep = 0,
   successMessage,
   onSubmit,
 }: FormWizardProps) {
@@ -63,7 +75,9 @@ export function FormWizard({
   const scrollRef = useRef<ScrollView>(null);
 
   const [values, setValues] = useState<FormValues>(initialValues);
-  const [stepIndex, setStepIndex] = useState(0);
+  // Nakatakda sa pagbukas: ang paglipat pagkatapos ay hawak na ng gumagamit,
+  // kaya hindi na ito sumusunod sa prop kahit magbago pa iyon.
+  const [stepIndex, setStepIndex] = useState(Math.min(initialStep, steps.length));
   const [saved, setSaved] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
@@ -151,6 +165,10 @@ export function FormWizard({
   }));
 
   return (
+    // Konteksto sa halip na props: nakabaon ang ImageField sa ilalim ng apat
+    // na component na wala namang gagawin sa mapa kundi ipasa ito. Tingnan
+    // ang existing-photos.
+    <ExistingPhotoProvider photos={existingPhotos}>
     <View style={styles.screen}>
       <StatusBar style="light" />
 
@@ -204,6 +222,7 @@ export function FormWizard({
               <ReviewStep
                 steps={steps}
                 values={values}
+                photos={existingPhotos}
                 onEditStep={goTo}
                 error={submitError}
               />
@@ -272,6 +291,7 @@ export function FormWizard({
         }}
       />
     </View>
+    </ExistingPhotoProvider>
   );
 }
 
@@ -341,46 +361,21 @@ function StepPills({
 function ReviewStep({
   steps,
   values,
+  photos,
   onEditStep,
   error,
 }: {
   steps: StepDef[];
   values: FormValues;
+  photos: ExistingPhotos;
   onEditStep: (index: number) => void;
   error: string | null;
 }) {
   // Binubuo mula mismo sa schema, kaya awtomatikong lumalabas dito ang anumang
-  // bagong field na idadagdag sa hinaharap.
-  const summary = useMemo(
-    () =>
-      steps.map((step, index) => ({
-        index,
-        title: step.title,
-        icon: step.icon,
-        entries: step.sections
-          .flatMap((section) => section.fields)
-          .filter((field) => isFieldVisible(field, values))
-          .map((field) => {
-            const raw = values[field.name];
-            let display: string;
-
-            if (field.type === 'toggle') {
-              display = raw === true ? 'Yes' : 'No';
-            } else if (field.options && typeof raw === 'string') {
-              display = field.options.find((o) => o.value === raw)?.label ?? '—';
-            } else {
-              display = typeof raw === 'string' && raw.trim() ? raw : '—';
-            }
-
-            return { name: field.name, label: field.label, display };
-          }),
-      })),
-    [steps, values]
-  );
-
-  const filledCount = summary
-    .flatMap((group) => group.entries)
-    .filter((entry) => entry.display !== '—' && entry.display !== 'No').length;
+  // bagong field na idadagdag sa hinaharap. Kapareho ito ng ginagamit ng view
+  // page — tingnan ang build-summary kung bakit iisa lang sila.
+  const summary = useMemo(() => buildSummary(steps, values, photos), [steps, values, photos]);
+  const filledCount = countFilled(summary);
 
   return (
     <>
@@ -401,32 +396,7 @@ function ReviewStep({
         </Text>
       </View>
 
-      {summary.map((group) => (
-        <View key={group.title} style={styles.reviewCard}>
-          <Pressable
-            style={styles.reviewHeader}
-            onPress={() => onEditStep(group.index)}
-            accessibilityRole="button"
-            accessibilityLabel={`Edit ${group.title}`}>
-            <View style={styles.iconRing}>
-              <Ionicons name={group.icon} size={17} color={Colors.primary} />
-            </View>
-            <Text style={styles.reviewTitle}>{group.title}</Text>
-            <Ionicons name="create-outline" size={18} color={Colors.primary} />
-          </Pressable>
-
-          {group.entries.map((entry) => (
-            <View key={entry.name} style={styles.reviewRow}>
-              <Text style={styles.reviewLabel}>{entry.label}</Text>
-              <Text
-                style={[styles.reviewValue, entry.display === '—' && styles.reviewValueEmpty]}
-                numberOfLines={2}>
-                {entry.display}
-              </Text>
-            </View>
-          ))}
-        </View>
-      ))}
+      <SummaryCards groups={summary} onEditStep={onEditStep} />
     </>
   );
 }
@@ -650,58 +620,6 @@ const styles = StyleSheet.create({
     fontSize: FontSize.sm,
     color: Colors.info,
     lineHeight: 19,
-  },
-  reviewCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.lg,
-    padding: Spacing.lg,
-    marginBottom: Spacing.md,
-    ...Shadow.card,
-  },
-  reviewHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-    paddingBottom: Spacing.md,
-    marginBottom: Spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.divider,
-  },
-  iconRing: {
-    width: 34,
-    height: 34,
-    borderRadius: Radius.pill,
-    backgroundColor: Colors.primaryLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  reviewTitle: {
-    flex: 1,
-    fontSize: FontSize.md,
-    fontWeight: '700',
-    color: Colors.text,
-  },
-  reviewRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: Spacing.md,
-    paddingVertical: Spacing.sm,
-  },
-  reviewLabel: {
-    flex: 1,
-    fontSize: FontSize.sm,
-    color: Colors.muted,
-  },
-  reviewValue: {
-    flex: 1,
-    fontSize: FontSize.sm,
-    fontWeight: '600',
-    color: Colors.text,
-    textAlign: 'right',
-  },
-  reviewValueEmpty: {
-    fontWeight: '400',
-    color: Colors.border,
   },
   successBackdrop: {
     flex: 1,

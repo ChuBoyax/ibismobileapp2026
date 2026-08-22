@@ -3,8 +3,10 @@ import { useMemo, useState } from 'react';
 import { FormGate } from '@/components/form/form-gate';
 import { FormWizard } from '@/components/form/form-wizard';
 import type { FormValues } from '@/components/form/types';
+import { RecordViewScreen } from '@/components/record-view-screen';
 import { buildPayload } from '@/features/registration/build-payload';
 import { buildValues } from '@/features/registration/build-values';
+import { existingPhotos } from '@/features/registration/existing-photos';
 import { familySteps } from '@/features/registration/family-form';
 import { saveRecord } from '@/features/registration/save-record';
 import { withBarangay } from '@/features/registration/barangay-step';
@@ -37,6 +39,13 @@ export default function FamilyFormScreen() {
     return {};
   }, [form.draftValues, form.record, steps]);
 
+  // Hiwalay sa mga sagot: ipinapakita lang ang mga dating litrato, hindi sila
+  // kailanman ipinapadala pabalik. Tingnan ang existing-photos.
+  const photos = useMemo(
+    () => existingPhotos(steps, form.record, 'family', form.recordId),
+    [steps, form.record, form.recordId]
+  );
+
   async function handleSubmit(values: FormValues) {
     const payload = buildPayload(steps, values);
 
@@ -56,23 +65,44 @@ export default function FamilyFormScreen() {
   const editing = !!form.recordId;
   const title = editing ? 'Edit family' : form.mode === 'fix' ? 'Fix family' : 'New family';
 
+  const viewTitle =
+    typeof form.record?.family_name === 'string' && form.record.family_name.trim()
+      ? form.record.family_name
+      : 'Family';
+
   return (
     <FormGate
-      title={title}
+      title={form.viewing ? viewTitle : title}
       loading={loading || form.loading}
       error={error || form.error}
       onRetry={() => {
         reload();
         form.reload();
       }}>
-      <FormWizard
-        title={title}
-        subtitle="Registry of Barangay Inhabitants"
-        steps={steps}
-        initialValues={initialValues}
-        onSubmit={handleSubmit}
-        successMessage={message}
-      />
+      {/* Buod muna kapag binuksan mula sa listahan. Ang stepper ay nasa likod
+          ng pindutang "Edit" — tingnan ang useRecordForm. */}
+      {form.viewing ? (
+        <RecordViewScreen
+          title={viewTitle}
+          subtitle="Registry of Barangay Inhabitants"
+          steps={steps}
+          values={initialValues}
+          existingPhotos={photos}
+          editHref={form.editHref}
+          pending={!!form.draftValues}
+        />
+      ) : (
+        <FormWizard
+          title={title}
+          subtitle="Registry of Barangay Inhabitants"
+          steps={steps}
+          initialValues={initialValues}
+          existingPhotos={photos}
+          initialStep={form.initialStep}
+          onSubmit={handleSubmit}
+          successMessage={message}
+        />
+      )}
     </FormGate>
   );
 }
