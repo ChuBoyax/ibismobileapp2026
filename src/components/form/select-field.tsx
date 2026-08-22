@@ -2,7 +2,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useMemo, useState } from 'react';
 import {
   FlatList,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -87,56 +89,65 @@ export function SelectField({
       {!error && !!hint && <Text style={styles.hint}>{hint}</Text>}
 
       <Modal visible={open} transparent animationType="slide" onRequestClose={close}>
-        <Pressable style={styles.backdrop} onPress={close} />
+        <KeyboardAvoidingView
+          style={styles.modalRoot}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <Pressable style={styles.backdrop} onPress={close} />
 
-        <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, Spacing.lg) }]}>
-          <View style={styles.grabber} />
-          <Text style={styles.sheetTitle}>{label}</Text>
+          <View
+            style={[
+              styles.sheet,
+              searchable && styles.sheetFixed,
+              { paddingBottom: Math.max(insets.bottom, Spacing.lg) },
+            ]}>
+            <View style={styles.grabber} />
+            <Text style={styles.sheetTitle}>{label}</Text>
 
-          {searchable && (
-            <View style={styles.search}>
-              <Ionicons name="search-outline" size={18} color={Colors.muted} />
-              <TextInput
-                style={styles.searchInput}
-                value={query}
-                onChangeText={setQuery}
-                placeholder="Search"
-                placeholderTextColor={Colors.muted}
-                autoCorrect={false}
-              />
-              {!!query && (
-                <Pressable onPress={() => setQuery('')} hitSlop={10}>
-                  <Ionicons name="close-circle" size={18} color={Colors.muted} />
-                </Pressable>
-              )}
-            </View>
-          )}
+            {searchable && (
+              <View style={styles.search}>
+                <Ionicons name="search-outline" size={18} color={Colors.muted} />
+                <TextInput
+                  style={styles.searchInput}
+                  value={query}
+                  onChangeText={setQuery}
+                  placeholder="Search"
+                  placeholderTextColor={Colors.muted}
+                  autoCorrect={false}
+                />
+                {!!query && (
+                  <Pressable onPress={() => setQuery('')} hitSlop={10}>
+                    <Ionicons name="close-circle" size={18} color={Colors.muted} />
+                  </Pressable>
+                )}
+              </View>
+            )}
 
-          <FlatList
-            data={results}
-            keyExtractor={(item) => item.value}
-            keyboardShouldPersistTaps="handled"
-            style={styles.list}
-            ListEmptyComponent={<Text style={styles.empty}>No matching option.</Text>}
-            renderItem={({ item }) => {
-              const active = item.value === value;
-              return (
-                <Pressable
-                  style={({ pressed }) => [styles.option, pressed && styles.optionPressed]}
-                  onPress={() => {
-                    onChange(item.value);
-                    close();
-                  }}
-                  accessibilityRole="button">
-                  <Text style={[styles.optionLabel, active && styles.optionLabelActive]}>
-                    {item.label}
-                  </Text>
-                  {active && <Ionicons name="checkmark" size={20} color={Colors.primary} />}
-                </Pressable>
-              );
-            }}
-          />
-        </View>
+            <FlatList
+              data={results}
+              keyExtractor={(item) => item.value}
+              keyboardShouldPersistTaps="handled"
+              style={styles.list}
+              ListEmptyComponent={<Text style={styles.empty}>No matching option.</Text>}
+              renderItem={({ item }) => {
+                const active = item.value === value;
+                return (
+                  <Pressable
+                    style={({ pressed }) => [styles.option, pressed && styles.optionPressed]}
+                    onPress={() => {
+                      onChange(item.value);
+                      close();
+                    }}
+                    accessibilityRole="button">
+                    <Text style={[styles.optionLabel, active && styles.optionLabelActive]}>
+                      {item.label}
+                    </Text>
+                    {active && <Ionicons name="checkmark" size={20} color={Colors.primary} />}
+                  </Pressable>
+                );
+              }}
+            />
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
@@ -191,8 +202,16 @@ const styles = StyleSheet.create({
     fontSize: FontSize.xs,
     color: Colors.muted,
   },
-  backdrop: {
+  modalRoot: {
     flex: 1,
+    justifyContent: 'flex-end',
+  },
+  backdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: 'rgba(10, 42, 24, 0.45)',
   },
   sheet: {
@@ -205,6 +224,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.xl,
     paddingTop: Spacing.md,
     ...Shadow.raised,
+  },
+  /*
+    NAKAPIRMI ANG TAAS KAPAG MAY SEARCH, at hindi lang maximum.
+
+    Sa `maxHeight` lang, sumusukat ang sheet sa laman nito: bawat titik na
+    idinadagdag sa paghahanap ay nagbabawas ng tugma, at umuurong ang sheet
+    kasabay nito hanggang sa maabot na ito ng keyboard mula sa ibaba. Ang
+    listahang hinahanapan ay dapat manatili sa iisang taas habang tinitipa,
+    kaya sa mahahabang listahan ay tahasan ang taas.
+
+    Sa maiikling listahan (walang search) ay walang sinasala, kaya walang
+    uurong — doon mas maganda pa rin ang sumusukat sa laman kaysa sa
+    sheet na kalahating blangko.
+  */
+  sheetFixed: {
+    height: '70%',
   },
   grabber: {
     alignSelf: 'center',
@@ -237,6 +272,10 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
   },
   list: {
+    // flex: para punan ang nakapirming taas sa itaas — kung hindi, ang
+    // listahan ay sumusukat pa rin sa laman at maiiwang blangko ang ilalim
+    // ng sheet imbes na maging bahagi ng maaaring i-scroll.
+    flex: 1,
     marginHorizontal: -Spacing.xl,
     paddingHorizontal: Spacing.xl,
   },

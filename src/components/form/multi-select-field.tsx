@@ -1,6 +1,16 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMemo, useState } from 'react';
-import { FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  FlatList,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { SelectOption } from '@/constants/form-options';
@@ -84,55 +94,65 @@ export function MultiSelectField({
       {!error && !!hint && <Text style={styles.hint}>{hint}</Text>}
 
       <Modal visible={open} transparent animationType="slide" onRequestClose={() => setOpen(false)}>
-        <Pressable style={styles.backdrop} onPress={() => setOpen(false)} />
+        <KeyboardAvoidingView
+          style={styles.modalRoot}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <Pressable style={styles.backdrop} onPress={() => setOpen(false)} />
 
-        <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, Spacing.lg) }]}>
-          <View style={styles.grabber} />
+          <View
+            style={[
+              styles.sheet,
+              searchable && styles.sheetFixed,
+              { paddingBottom: Math.max(insets.bottom, Spacing.lg) },
+            ]}>
+            <View style={styles.grabber} />
 
-          <View style={styles.sheetHeader}>
-            <Text style={styles.sheetTitle}>{label}</Text>
-            <Pressable onPress={() => setOpen(false)} hitSlop={10} accessibilityRole="button">
-              <Text style={styles.done}>Done</Text>
-            </Pressable>
-          </View>
-
-          {searchable && (
-            <View style={styles.search}>
-              <Ionicons name="search-outline" size={18} color={Colors.muted} />
-              <TextInput
-                style={styles.searchInput}
-                value={query}
-                onChangeText={setQuery}
-                placeholder="Search"
-                placeholderTextColor={Colors.muted}
-                autoCorrect={false}
-              />
+            <View style={styles.sheetHeader}>
+              <Text style={styles.sheetTitle}>{label}</Text>
+              <Pressable onPress={() => setOpen(false)} hitSlop={10} accessibilityRole="button">
+                <Text style={styles.done}>Done</Text>
+              </Pressable>
             </View>
-          )}
 
-          <FlatList
-            data={results}
-            keyExtractor={(item) => item.value}
-            keyboardShouldPersistTaps="handled"
-            ListEmptyComponent={<Text style={styles.empty}>No matching option.</Text>}
-            renderItem={({ item }) => {
-              const checked = value.includes(item.value);
+            {searchable && (
+              <View style={styles.search}>
+                <Ionicons name="search-outline" size={18} color={Colors.muted} />
+                <TextInput
+                  style={styles.searchInput}
+                  value={query}
+                  onChangeText={setQuery}
+                  placeholder="Search"
+                  placeholderTextColor={Colors.muted}
+                  autoCorrect={false}
+                />
+              </View>
+            )}
 
-              return (
-                <Pressable
-                  style={styles.option}
-                  onPress={() => toggle(item.value)}
-                  accessibilityRole="checkbox"
-                  accessibilityState={{ checked }}>
-                  <View style={[styles.checkbox, checked && styles.checkboxOn]}>
-                    {checked && <Ionicons name="checkmark" size={15} color={Colors.onPrimary} />}
-                  </View>
-                  <Text style={styles.optionLabel}>{item.label}</Text>
-                </Pressable>
-              );
-            }}
-          />
-        </View>
+            <FlatList
+              data={results}
+              keyExtractor={(item) => item.value}
+              keyboardShouldPersistTaps="handled"
+              style={styles.list}
+              ListEmptyComponent={<Text style={styles.empty}>No matching option.</Text>}
+              renderItem={({ item }) => {
+                const checked = value.includes(item.value);
+
+                return (
+                  <Pressable
+                    style={styles.option}
+                    onPress={() => toggle(item.value)}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked }}>
+                    <View style={[styles.checkbox, checked && styles.checkboxOn]}>
+                      {checked && <Ionicons name="checkmark" size={15} color={Colors.onPrimary} />}
+                    </View>
+                    <Text style={styles.optionLabel}>{item.label}</Text>
+                  </Pressable>
+                );
+              }}
+            />
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
@@ -180,7 +200,18 @@ const styles = StyleSheet.create({
   placeholder: { fontSize: FontSize.md, color: Colors.muted },
   hint: { marginTop: Spacing.xs, fontSize: FontSize.xs, color: Colors.muted },
   error: { marginTop: Spacing.xs, fontSize: FontSize.xs, color: Colors.danger },
-  backdrop: { flex: 1, backgroundColor: 'rgba(10, 42, 24, 0.45)' },
+  modalRoot: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  backdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(10, 42, 24, 0.45)',
+  },
   sheet: {
     maxHeight: '70%',
     backgroundColor: Colors.surface,
@@ -189,6 +220,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.xl,
     paddingTop: Spacing.md,
     ...Shadow.raised,
+  },
+  /* Tingnan ang `select-field.tsx` — iisa ang dahilan: hindi dapat umuurong
+     ang sheet sa bawat titik ng paghahanap. */
+  sheetFixed: {
+    height: '70%',
+  },
+  list: {
+    flex: 1,
   },
   grabber: {
     alignSelf: 'center',
