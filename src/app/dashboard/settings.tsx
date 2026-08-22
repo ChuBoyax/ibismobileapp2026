@@ -2,7 +2,16 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  View,
+} from 'react-native';
 
 import { TAB_BAR_HEIGHT } from '@/components/animated-tab-bar';
 import { ScreenHeader } from '@/components/screen-header';
@@ -17,6 +26,9 @@ import {
 import { authenticate, getBiometricSupport, type BiometricSupport } from '@/lib/biometrics';
 import { clearCache } from '@/lib/db';
 import { clearOutbox, counts } from '@/lib/outbox';
+// Ang talaan ng naipadala ay pag-aari ng gumamit, hindi ng cellphone —
+// hindi ito dapat makita ng susunod na papasok.
+import { clearHistory } from '@/lib/sync-history';
 import { endSession } from '@/lib/session';
 import { initialOf, useProfile } from '@/lib/use-profile';
 
@@ -54,6 +66,7 @@ const ACCOUNT: Option[] = [
     icon: 'information-circle-outline',
     tint: Colors.infoLight,
     color: Colors.info,
+    onPress: () => router.push('/about'),
   },
 ];
 
@@ -105,8 +118,21 @@ function Row({
   );
 }
 
+/**
+ * Anong yugto ng pag-alis ang kasalukuyang tumatakbo.
+ *
+ *   checking — binibilang ang hindi pa naipapadala, bago ang babala
+ *   out      — pinindot na ang Log out sa dialog; tinatapos na ang session
+ *
+ * PINAGHIHIWALAY ANG DALAWA dahil magkaiba ang dapat sabihin. Sa una, hindi
+ * pa nagdedesisyon ang tao — mali ang sabihing "Logging out…" gayong may
+ * Cancel pa siyang mapipindot. Sa pangalawa, wala nang atrasan.
+ */
+type LogoutPhase = 'checking' | 'out' | null;
+
 export default function SettingsScreen() {
   const profile = useProfile();
+  const [logout, setLogout] = useState<LogoutPhase>(null);
   const [biometric, setBiometric] = useState<BiometricSupport | null>(null);
   const [biometricOn, setBiometricOn] = useState(false);
   const [pinSet, setPinSet] = useState(false);
@@ -160,6 +186,15 @@ export default function SettingsScreen() {
   }
 
   async function handleLogout() {
+    // WALANG PALATANDAAN NG PAGPINDOT ANG DATING PINDUTAN.
+    //
+    // Sa pagitan ng pagpindot at ng paglitaw ng dialog ay may pagbasa sa
+    // database; pagkatapos kumpirmahin, may tawag pa sa server. Sa mabagal na
+    // cellphone o mahinang signal, ang parehong yugto ay tahimik — kaya
+    // pinipindot ulit ng user ang parehong pindutan, akala niya ay hindi
+    // tumama. Dito nagsisimula ang tanda, hindi sa dulo.
+    setLogout('checking');
+
     // Hindi pinapabayaang mabitin ang pindutan.
     //
     // Ang bilang ay pampaganda lang ng babala — kung mabigo itong kunin,
@@ -169,6 +204,7 @@ export default function SettingsScreen() {
       pending: 0,
       syncing: 0,
       needsFix: 0,
+      conflicts: 0,
       total: 0,
     }));
 
@@ -185,19 +221,29 @@ export default function SettingsScreen() {
         : 'Your PIN and biometric settings stay saved on this device.';
 
     Alert.alert('Log out', warning, [
-      { text: 'Cancel', style: 'cancel' },
+      // Pati ang pag-atras ay dapat magbalik ng pindutan sa dating anyo —
+      // kung hindi, mananatiling naka-spinner ang hindi naman pala umalis.
+      { text: 'Cancel', style: 'cancel', onPress: () => setLogout(null) },
       {
         text: 'Log out',
         style: 'destructive',
         // Hindi binubura ang PIN — session lang ang tinatapos.
         // replace para hindi na makabalik sa dashboard gamit ang back button.
         onPress: async () => {
-          await apiLogout(); // binabawi ang token sa server
-          await endSession();
-          router.replace('/login');
+          setLogout('out');
+
+          try {
+            await apiLogout(); // binabawi ang token sa server
+            await endSession();
+            router.replace('/login');
+          } catch {
+            // Kung may pumalya, huwag iwang naka-spinner ang screen —
+            // mas mabuting mapindot ulit kaysa magmukhang nakabitin.
+            setLogout(null);
+          }
         },
       },
-    ]);
+    ], { onDismiss: () => setLogout((phase) => (phase === 'checking' ? null : phase)) });
   }
 
   function handleRemoveSecurity() {
@@ -213,7 +259,7 @@ export default function SettingsScreen() {
             await apiLogout();
             // Buong pag-alis sa device — kasama ang hindi pa naipapadalang
             // tala, dahil pwedeng iba na ang susunod na mag-login dito.
-            await Promise.all([clearSecurity(), clearCache(), clearOutbox()]);
+            await Promise.all([clearSecurity(), clearCache(), clearOutbox(), clearHistory()]);
             setPinSet(false);
             setBiometricOn(false);
             router.replace('/login');
@@ -304,11 +350,24 @@ export default function SettingsScreen() {
         </View>
 
         <Pressable
-          style={({ pressed }) => [styles.logout, pressed && styles.logoutPressed]}
+          style={({ pressed }) => [
+            styles.logout,
+            pressed && styles.logoutPressed,
+            !!logout && styles.logoutBusy,
+          ]}
           onPress={handleLogout}
-          accessibilityRole="button">
-          <Ionicons name="log-out-outline" size={19} color={Colors.danger} />
-          <Text style={styles.logoutText}>Log out</Text>
+          disabled={!!logout}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: !!logout, busy: !!logout }}>
+          {logout ? (
+            <ActivityIndicator color={Colors.danger} size="small" />
+          ) : (
+            <Ionicons name="log-out-outline" size={19} color={Colors.danger} />
+          )}
+
+          <Text style={styles.logoutText}>
+            {logout === 'out' ? 'Logging out…' : 'Log out'}
+          </Text>
         </Pressable>
 
         <Text style={styles.version}>IBIS Mobile · v1.0.0</Text>
@@ -432,6 +491,9 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface,
     borderWidth: 1.5,
     borderColor: Colors.dangerLight,
+  },
+  logoutBusy: {
+    opacity: 0.7,
   },
   logoutPressed: {
     backgroundColor: Colors.dangerLight,

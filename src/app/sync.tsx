@@ -16,6 +16,7 @@ import {
   type OutboxSummary,
   type OutboxType,
 } from '@/lib/outbox';
+import { clearHistory, history, type SyncEntry } from '@/lib/sync-history';
 import { drain, subscribe } from '@/lib/sync';
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
@@ -31,6 +32,9 @@ const TYPE_ICON: Record<OutboxType, IoniconName> = {
   household: 'home',
   family: 'people',
 };
+
+/** Ilan sa mga naipadala na ang ipinapakita sa ilalim. */
+const HISTORY_SHOWN = 20;
 
 /** Kailangan ng token — hindi mai-sync ang anuman kung hindi naka-login. */
 export default function GuardedSyncScreen() {
@@ -53,7 +57,7 @@ const GROUP_LABEL: Record<Group, string> = {
 };
 
 /**
- * Isang patag na listahan ng pamagat at hilera.
+ * Isang patag na listahan ng pamagat at hilera — ang PILA lamang.
  *
  * PINATAG PARA MAI-VIRTUALIZE. Dati'y tatlong nakapugad na `map` ito sa loob
  * ng isang `ScrollView`, kaya nakabuo ng hilera ang BAWAT tala sa pila kahit
@@ -61,9 +65,10 @@ const GROUP_LABEL: Record<Group, string> = {
  * mismong dahilan kung bakit may screen na ito — daan-daang view ang nabubuo,
  * at nagagawa itong muli sa tuwing may umuusad sa sync.
  *
- * Ang `FlatList` ay hindi tumatanggap ng pugad, kaya ang pangkat at pamagat ay
- * ginagawang magkakasunod na entry. Dala ng bawat hilera kung siya ang una o
- * huli sa pangkat niya, dahil doon nakasabit ang hugis ng card.
+ * Ang pila lang ang pinapatag dahil ito lang ang walang hangganan. Ang talaan
+ * ng naipadala ay may takda (`HISTORY_SHOWN`), kaya nananatili itong payak sa
+ * ilalim ng listahan — walang napapala sa pagpapagulo ng bagay na dalawampu
+ * lang ang katapat.
  */
 type Entry =
   | { kind: 'header'; key: string; label: string }
@@ -80,13 +85,20 @@ function SyncScreen() {
   const insets = useSafeAreaInsets();
 
   const [items, setItems] = useState<OutboxSummary[]>([]);
+  const [sent, setSent] = useState<SyncEntry[]>([]);
   const [running, setRunning] = useState(false);
+  /** Bilang ng naipadala sa katatapos na pagsubok — ito ang berdeng abiso. */
+  const [justSynced, setJustSynced] = useState(0);
 
   const load = useCallback(async () => {
-    // Sinasadyang walang payload — tingnan ang `listSummaries`. Ang payload
-    // ang pinakamabigat na bahagi ng bawat hilera at wala namang ginagamit
-    // dito ang screen, gayong sa bawat pag-usad ng sync ito binabasang muli.
-    setItems(await listSummaries());
+    // Sinasadyang walang payload ang binabasa sa pila — tingnan ang
+    // `listSummaries`. Ang payload ang pinakamabigat na bahagi ng bawat hilera
+    // at wala namang ginagamit dito ang screen, gayong sa bawat pag-usad ng
+    // sync ito binabasang muli.
+    const [queued, done] = await Promise.all([listSummaries(), history(HISTORY_SHOWN)]);
+
+    setItems(queued);
+    setSent(done);
   }, []);
 
   useFocusEffect(
@@ -99,7 +111,13 @@ function SyncScreen() {
       // nakikita ang pag-usad nang hindi kailangang mag-pull.
       const unsubscribe = subscribe((state) => {
         if (!active) return;
+
         setRunning(state.running);
+
+        // Habang tumatakbo, hindi pa tapos ang bilang — sa dulo lang ito
+        // may kahulugan, kaya doon lang ito ipinapakita.
+        if (!state.running) setJustSynced(state.justSynced);
+
         void load();
       });
 
@@ -160,6 +178,24 @@ function SyncScreen() {
   const openFix = useCallback((item: OutboxSummary) => {
     router.push(`/registration/${item.type}?draft=${item.uuid}` as never);
   }, []);
+
+  const confirmClearHistory = useCallback(() => {
+    Alert.alert(
+      'Clear the sent list?',
+      'This only clears the list on this device. The records themselves stay in the barangay registry.',
+      [
+        { text: 'Keep', style: 'cancel' },
+        {
+          text: 'Clear',
+          style: 'destructive',
+          onPress: async () => {
+            await clearHistory();
+            await load();
+          },
+        },
+      ]
+    );
+  }, [load]);
 
   const waitingCount = items.filter(
     (item) => item.status !== 'needs_fix' && item.status !== 'conflict'
@@ -262,13 +298,28 @@ function SyncScreen() {
         contentContainerStyle={[
           styles.content,
           { paddingBottom: insets.bottom + Spacing.xxl },
-          entries.length === 0 && styles.emptyContent,
         ]}
         showsVerticalScrollIndicator={false}
         // Sapat para mapuno ang unang tanawin nang hindi binubuo ang lahat.
         initialNumToRender={12}
         maxToRenderPerBatch={12}
         windowSize={7}
+        ListHeaderComponent={
+          /* ANG PATUNAY NG TAGUMPAY.
+
+             Dati, ang tanging nakikita pagkatapos magpadala ay ang paglaho ng
+             laman ng pila — kaparehong hitsura ng talang tahimik na nawala.
+             Ito ang nagpapaiba sa dalawa, at nananatili hanggang sa susunod na
+             pagsubok kaya hindi ito napapalampas ng hindi nakatingin. */
+          justSynced > 0 ? (
+            <View style={styles.success}>
+              <Ionicons name="checkmark-circle" size={20} color={Colors.primary} />
+              <Text style={styles.successText}>
+                {justSynced} record{justSynced === 1 ? '' : 's'} sent successfully.
+              </Text>
+            </View>
+          ) : null
+        }
         ListEmptyComponent={
           <View style={styles.empty}>
             <View style={styles.emptyIcon}>
@@ -276,9 +327,51 @@ function SyncScreen() {
             </View>
             <Text style={styles.emptyTitle}>All synced</Text>
             <Text style={styles.emptyText}>
-              Records you save without a connection will wait here until the signal comes back.
+              {sent.length > 0
+                ? 'Nothing is waiting. Everything you saved has reached the barangay registry.'
+                : 'Records you save without a connection will wait here until the signal comes back.'}
             </Text>
           </View>
+        }
+        ListFooterComponent={
+          sent.length > 0 ? (
+            <>
+              <View style={styles.groupRow}>
+                <Text style={styles.groupLabel}>SENT</Text>
+                <Pressable onPress={confirmClearHistory} hitSlop={10} accessibilityRole="button">
+                  <Text style={styles.clearLink}>Clear list</Text>
+                </Pressable>
+              </View>
+
+              <View style={styles.list}>
+                {sent.map((entry, index) => (
+                  <View
+                    key={entry.id}
+                    style={[styles.sentRow, index === sent.length - 1 && styles.lastSentRow]}>
+                    <View style={styles.sentIcon}>
+                      <Ionicons name="checkmark" size={14} color={Colors.primary} />
+                    </View>
+
+                    <View style={styles.flex}>
+                      <Text style={styles.rowTitle} numberOfLines={1}>
+                        {entry.label || TYPE_LABEL[entry.type]}
+                      </Text>
+                      <Text style={styles.rowMeta}>
+                        {/* Malaki ang pagkakaiba ng bagong tala at ng pagwawasto
+                            kapag binabalikan mo kung ano ang nangyari. */}
+                        {TYPE_LABEL[entry.type]} {entry.action === 'updated' ? 'updated' : 'added'} ·{' '}
+                        {relativeTime(entry.syncedAt.toISOString())}
+                      </Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+
+              <Text style={styles.footnote}>
+                The last {sent.length} sent from this device. Older ones are removed to save space.
+              </Text>
+            </>
+          ) : null
         }
       />
     </View>
@@ -457,8 +550,53 @@ const styles = StyleSheet.create({
   content: {
     padding: Spacing.xl,
   },
-  emptyContent: {
-    flexGrow: 1,
+  success: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    padding: Spacing.lg,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.primaryLight,
+  },
+  successText: {
+    flex: 1,
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.primary,
+  },
+  groupRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  clearLink: {
+    marginTop: Spacing.lg,
+    marginBottom: Spacing.md,
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+    color: Colors.muted,
+  },
+  sentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    paddingVertical: Spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.divider,
+  },
+  sentIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: Radius.pill,
+    backgroundColor: Colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  footnote: {
+    marginTop: Spacing.md,
+    marginHorizontal: Spacing.xs,
+    fontSize: 11,
+    color: Colors.muted,
   },
   groupLabel: {
     marginTop: Spacing.lg,
@@ -469,15 +607,24 @@ const styles = StyleSheet.create({
     color: Colors.muted,
     letterSpacing: 1,
   },
+  list: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.lg,
+    paddingHorizontal: Spacing.lg,
+    ...Shadow.card,
+  },
   /*
-    ANG CARD AY GAWA NG MGA HILERA MISMO, HINDI NG BALOT NA VIEW.
+    ANG CARD NG PILA AY GAWA NG MGA HILERA MISMO, HINDI NG BALOT NA VIEW.
 
-    Kailangan nito ng virtualization: ang mga hilera ay magkakapatid na sa
-    FlatList at wala nang iisang magulang na maaaring bigyan ng bilog na gilid.
-    Kaya ang unang hilera ang may dalang itaas na kurba at ang huli ang may
-    ibaba — at dahil magkadikit at opaque ang mga ito, ang anino ng bawat
+    Kailangan nito ng virtualization: ang mga hilera ng pila ay magkakapatid na
+    sa FlatList at wala nang iisang magulang na maaaring bigyan ng bilog na
+    gilid. Kaya ang unang hilera ang may dalang itaas na kurba at ang huli ang
+    may ibaba — at dahil magkadikit at opaque ang mga ito, ang anino ng bawat
     hilera ay natatakpan ng kasunod, at ang natitirang nakikita ay ang anino ng
     buong pangkat.
+
+    Ang talaan ng naipadala ay nananatili sa loob ng `list` — may takda ang
+    haba nito, kaya walang virtualization na kailangan doon.
   */
   row: {
     backgroundColor: Colors.surface,
@@ -495,6 +642,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0,
     borderBottomLeftRadius: Radius.lg,
     borderBottomRightRadius: Radius.lg,
+  },
+  lastSentRow: {
+    borderBottomWidth: 0,
   },
   rowTop: {
     flexDirection: 'row',

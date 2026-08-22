@@ -4,7 +4,7 @@
     "slug": "ibismobileapp",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/app-icon.png",
     "scheme": "ibismobileapp",
     "userInterfaceStyle": "light",
     "ios": {
@@ -12,13 +12,11 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E8F5EC",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "foregroundImage": "./assets/images/adaptive-icon-foreground.png",
+        "backgroundColor": "#1B7A3E"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.laxsnorxx.ibismobileapp"
+      "package": "com.yaxdev.ibismobileapp"
     },
     "web": {
       "output": "static",
@@ -30,13 +28,21 @@
         "expo-splash-screen",
         {
           "backgroundColor": "#1B7A3E",
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "image": "./assets/images/splash-logo.png",
+          "imageWidth": 160
         }
       ],
       "expo-font",
       "expo-secure-store",
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": false
+          }
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
@@ -46,7 +52,7 @@
       "apiBaseUrl": "https://ibis.lgubatoleyte.gov.ph",
       "router": {},
       "eas": {
-        "projectId": "7e174968-ab2a-4ff5-a979-8e281c83cf8f"
+        "projectId": "8058a11d-508b-4ee0-9fe3-3b131692287e"
       }
     }
   }

@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, type Href } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useRef, useState } from 'react';
 import {
@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TAB_BAR_HEIGHT } from '@/components/animated-tab-bar';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '@/constants/theme';
 import { ActivitySheet } from '@/components/activity-sheet';
+import { ScopePicker } from '@/components/scope-picker';
 import { ReauthBanner } from '@/components/reauth-banner';
 import { SyncPillRow } from '@/components/sync-pill';
 import {
@@ -28,7 +29,7 @@ import {
   type Stat,
 } from '@/lib/api';
 import { formatNumber, relativeTime } from '@/lib/format';
-import { CacheKey, getCache, putCache } from '@/lib/db';
+import { CacheKey, dashboardCacheKey, getCache, putCache } from '@/lib/db';
 import { handleAuthError } from '@/lib/session';
 import { useOfflineSession } from '@/lib/use-offline-session';
 import { useProfile } from '@/lib/use-profile';
@@ -73,10 +74,18 @@ const STAT_META: {
   },
 ];
 
-const QUICK_ACTIONS: { label: string; icon: IoniconName }[] = [
-  { label: 'Add Resident', icon: 'person-add-outline' },
-  { label: 'New Household', icon: 'home-outline' },
-  { label: 'Generate Report', icon: 'document-text-outline' },
+/*
+  Ang tatlong pinakamadalas na simulan mula sa dashboard.
+
+  Ang dating "Generate Report" ay inalis: may sariling tab na ang ulat, at
+  walang ginagawa ang pindutan kundi ulitin ang nandoon na. Ang pamilya naman
+  ay isa sa tatlong bagay na itinatala sa field, kaya nararapat itong nasa
+  parehong hanay ng residente at sambahayan.
+*/
+const QUICK_ACTIONS: { label: string; icon: IoniconName; href: Href }[] = [
+  { label: 'Add Resident', icon: 'person-add-outline', href: '/registration/resident' },
+  { label: 'Add Family', icon: 'people-outline', href: '/registration/family' },
+  { label: 'New Household', icon: 'home-outline', href: '/registration/household' },
 ];
 
 const ACTIVITY_STYLE: Record<ActivityItem['type'], { icon: IoniconName; tint: string; color: string }> =
@@ -134,10 +143,12 @@ export default function DashboardScreen() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  /** null = lahat ng nasasakupan. */
+  const [barangayId, setBarangayId] = useState<number | null>(null);
 
   const mounted = useRef(true);
 
-  const load = useCallback(async (isRefresh = false) => {
+  const load = useCallback(async (chosen: number | null, isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
 
     // Ipinapakita agad ang huling naka-save bago pa man subukan ang server.
@@ -146,8 +157,13 @@ export default function DashboardScreen() {
     // titingin ng spinner nang labinlimang segundo bago pa lumitaw ang datos
     // na nasa cellphone na pala niya sa buong oras na iyon. Sa halip: laman
     // muna, saka pagsasariwa — kaya agad ang bukas kahit nasa bundok ka.
+    // SARILING SUSI KADA BARANGAY. Kung iisa lang, ang bilang ng Baldoza ay
+    // maipapakita habang nakasulat sa chip na Kantasma — ang numerong mukhang
+    // totoo pero mali ay mas mapanganib kaysa sa walang numero.
+    const key = dashboardCacheKey(chosen);
+
     if (!isRefresh) {
-      const saved = await getCache<DashboardData>(CacheKey.dashboard);
+      const saved = await getCache<DashboardData>(key);
 
       if (saved && mounted.current) {
         setData(saved.value);
@@ -156,14 +172,14 @@ export default function DashboardScreen() {
     }
 
     try {
-      const result = await dashboard();
+      const result = await dashboard(chosen);
       if (!mounted.current) return;
 
       setData(result);
       setError('');
 
       // Itinatabi para may maipakita kahit mawalan ng internet mamaya.
-      putCache(CacheKey.dashboard, result);
+      putCache(key, result);
 
       // Hiwalay at hindi mahalaga — kung mabigo, wala lang tuldok sa bell.
       notifications()
@@ -178,7 +194,7 @@ export default function DashboardScreen() {
 
       // Hindi naabot ang server. Imbes na blangkong screen, ipakita ang
       // huling nakuha at sabihin nang malinaw kung kailan iyon.
-      const cached = await getCache<DashboardData>(CacheKey.dashboard);
+      const cached = await getCache<DashboardData>(key);
 
       if (!mounted.current) return;
 
@@ -201,12 +217,12 @@ export default function DashboardScreen() {
   useFocusEffect(
     useCallback(() => {
       mounted.current = true;
-      load();
+      load(barangayId);
 
       return () => {
         mounted.current = false;
       };
-    }, [load])
+    }, [load, barangayId])
   );
 
   // Barangay galing sa dashboard response; profile ang panandaliang kapalit
@@ -214,6 +230,22 @@ export default function DashboardScreen() {
   const barangays = data?.barangays.length
     ? data.barangays.join(' · ')
     : (profile?.barangays.map((b) => b.name.trim()).join(' · ') ?? '');
+
+  /*
+    ANG SALAIN NG BARANGAY AY PARA SA MAY MARAMING NASASAKUPAN.
+
+    Sa may iisang barangay, ang chip na "All barangays" ay walang sinasabi —
+    laging iisa ang sagot. Kaya lumalabas lang ito kapag may tunay na pagpipilian.
+
+    Ang listahan ay galing sa sagot ng server, at ang profile ang pansamantalang
+    kapalit habang hindi pa dumarating iyon — nariyan din naman ito, kaya may
+    laman ang chip agad-agad.
+  */
+  const choices =
+    data?.available_barangays ??
+    profile?.barangays.map((b) => ({ id: b.id, name: b.name.trim() })) ??
+    [];
+
 
   return (
     <View style={styles.screen}>
@@ -225,7 +257,7 @@ export default function DashboardScreen() {
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={() => load(true)}
+            onRefresh={() => load(barangayId, true)}
             colors={[Colors.primary]}
             tintColor={Colors.primary}
           />
@@ -257,12 +289,12 @@ export default function DashboardScreen() {
             </Pressable>
           </View>
 
-          <View style={styles.headerMeta}>
-            <Ionicons name="location-outline" size={13} color={Colors.primaryLight} />
-            <Text style={styles.headerMetaText} numberOfLines={1}>
-              {barangays || 'No barangay assigned'}
-            </Text>
-          </View>
+          <ScopePicker
+            choices={choices}
+            selected={barangayId}
+            onSelect={setBarangayId}
+            fallback={barangays}
+          />
 
           {/* Lumilitaw lang kapag may naghihintay o may kailangang ayusin. */}
           <SyncPillRow />
@@ -270,7 +302,7 @@ export default function DashboardScreen() {
 
         <View style={styles.content}>
           {!!error && (
-            <Pressable style={styles.banner} onPress={() => load()}>
+            <Pressable style={styles.banner} onPress={() => load(barangayId)}>
               <Ionicons name="cloud-offline-outline" size={18} color={Colors.danger} />
               <View style={styles.flex}>
                 <Text style={styles.bannerText}>{error}</Text>
@@ -300,7 +332,10 @@ export default function DashboardScreen() {
             {QUICK_ACTIONS.map((action) => (
               <Pressable
                 key={action.label}
-                style={({ pressed }) => [styles.actionCard, pressed && styles.actionCardPressed]}>
+                style={({ pressed }) => [styles.actionCard, pressed && styles.actionCardPressed]}
+                onPress={() => router.push(action.href)}
+                accessibilityRole="button"
+                accessibilityLabel={action.label}>
                 <View style={styles.actionIcon}>
                   <Ionicons name={action.icon} size={20} color={Colors.primary} />
                 </View>
@@ -427,18 +462,6 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.accent,
     borderWidth: 1.5,
     borderColor: Colors.primary,
-  },
-  headerMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.xs,
-    marginTop: Spacing.lg,
-  },
-  headerMetaText: {
-    flex: 1,
-    fontSize: FontSize.xs,
-    color: Colors.primaryLight,
-    letterSpacing: 0.2,
   },
   content: {
     paddingHorizontal: Spacing.xl,

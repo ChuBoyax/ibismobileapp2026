@@ -1,15 +1,19 @@
+import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
+  ImageBackground,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -41,8 +45,25 @@ type Errors = {
   password?: string;
 };
 
+/**
+ * Sa ibaba nito, masikip na ang screen para sa buong header.
+ *
+ * Karamihan ng cellphone ngayon ay lampas 800dp ang taas; ang mga mura at
+ * maliliit — na siyang laganap sa barangay — ay nasa 640 hanggang 700. Doon
+ * hindi na kasya ang malaking selyo kasama ang card, at lalong hindi kapag
+ * nakaangat na ang keyboard.
+ */
+const SHORT_SCREEN_DP = 720;
+
 export default function LoginScreen() {
   const insets = useSafeAreaInsets();
+
+  // Ang taas ng window ang sinusukat, hindi ang uri ng cellphone — kaya
+  // sumasabay ito sa split-screen at sa pagbaligtad ng screen. Kung umuurong
+  // din ito paglabas ng keyboard, lalo pang lumiliit ang header, at iyon
+  // naman ang gusto nating mangyari sa sandaling iyon.
+  const { height } = useWindowDimensions();
+  const compact = height < SHORT_SCREEN_DP;
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -57,6 +78,48 @@ export default function LoginScreen() {
     mounted.current = true;
     return () => {
       mounted.current = false;
+    };
+  }, []);
+
+  /*
+    ANG PAG-ANGAT NG KEYBOARD AY NAGTATABON SA MGA FIELD.
+
+    Umuurong ang window kapag lumabas ang keyboard (adjustResize ang gamit ng
+    Android dito), kaya nagiging ma-scroll ang nilalaman — pero walang kusang
+    gumagalaw. Sa maliit na cellphone, ang natatabunan ay ang mismong
+    pinipindot: ang password at ang LOG IN.
+
+    Kaya sa sandaling umangat ito, dinadala natin ang dulo ng nilalaman sa
+    tanaw. Dalawang pagkakataon ang ginagamit dahil magkaiba ang oras nila sa
+    bawat aparato: ang abiso ng keyboard, at ang pag-urong mismo ng ScrollView.
+    Alinman ang mauna, tama pa rin ang kalalabasan.
+  */
+  const scrollRef = useRef<ScrollView>(null);
+  const keyboardUp = useRef(false);
+
+  function revealFields() {
+    scrollRef.current?.scrollToEnd({ animated: true });
+  }
+
+  useEffect(() => {
+    const shown = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      () => {
+        keyboardUp.current = true;
+        revealFields();
+      }
+    );
+
+    const hidden = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => {
+        keyboardUp.current = false;
+      }
+    );
+
+    return () => {
+      shown.remove();
+      hidden.remove();
     };
   }, []);
 
@@ -243,23 +306,72 @@ export default function LoginScreen() {
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView
+          ref={scrollRef}
           contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + Spacing.xxl }]}
           keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}>
-          {/* Green header na may curved na ilalim */}
-          <View style={[styles.header, { paddingTop: insets.top + Spacing.xxl }]}>
-            <View style={styles.sealRing}>
-              <Image
-                source={require('../../assets/images/batologo-256.png')}
-                style={styles.seal}
-                resizeMode="contain"
-                accessibilityLabel="Seal of the Municipality of Bato, Leyte"
-              />
-            </View>
+          showsVerticalScrollIndicator={false}
+          // Umuurong ang ScrollView kapag umangat ang keyboard. Dito natin
+          // nasisiguro ang pag-scroll kahit dumating ang abiso ng keyboard
+          // bago pa matapos ang bagong sukat.
+          onLayout={() => {
+            if (keyboardUp.current) revealFields();
+          }}>
+          {/* Larawan ng bayan, may gradient sa ibabaw at curved na ilalim */}
+          <ImageBackground
+            source={require('../../assets/images/batomn.jpg')}
+            style={styles.header}
+            imageStyle={styles.headerImage}
+            resizeMode="cover">
+            {/*
+              GRADIENT, HINDI PANTAY NA TAKIP.
 
-            <Text style={styles.appTitle}>Integrated Barangay{'\n'}Information System</Text>
-            <Text style={styles.appSubtitle}>Municipality of Bato, Province of Leyte</Text>
-          </View>
+              Ang pantay na takip ay pinapatay ang buong larawan nang sabay —
+              nawawala ang dahilan kung bakit ito inilagay. Ang gradient ay
+              pinapayagang huminga ang itaas, kung saan walang teksto, at
+              dinidiliman lang ang ibaba kung saan nakatayo ang pangalan ng
+              sistema at kung saan ito sumasalubong sa puting card.
+
+              ANG LAKAS AY SINUKAT, HINDI HINULA. Ang pinakamasamang kaso ay
+              puting bahagi ng larawan sa likod ng puting teksto. Sa bawat
+              lugar na may teksto:
+
+                selyo (itaas, 5%)      0.38  — walang teksto, may puting
+                                              singsing ang selyo mismo
+                pamagat (56%)          0.72  — 5.25:1, hangganan 3.0 (malaki)
+                subtitle (78%)         0.82  — 6.27:1, hangganan 4.5 (maliit)
+                ilalim (100%)          0.92  — 9.49:1
+
+              Ang 0.55 na hantungan ng gitnang hinto ay hindi basta napili:
+              doon nagsisimula ang pamagat. Kung itataas iyon, ang teksto ay
+              mapupunta sa maliwanag na bahagi at mawawala ang buong margin.
+            */}
+            <LinearGradient
+              colors={['rgba(14,63,33,0.35)', 'rgba(14,63,33,0.72)', 'rgba(14,63,33,0.92)']}
+              locations={[0, 0.55, 1]}
+              style={styles.scrim}
+            />
+
+            <View
+              style={[
+                styles.headerInner,
+                compact && styles.headerInnerCompact,
+                { paddingTop: insets.top + (compact ? Spacing.lg : Spacing.xxl) },
+              ]}>
+              <View style={[styles.sealRing, compact && styles.sealRingCompact]}>
+                <Image
+                  source={require('../../assets/images/batologo-256.png')}
+                  style={[styles.seal, compact && styles.sealCompact]}
+                  resizeMode="contain"
+                  accessibilityLabel="Seal of the Municipality of Bato, Leyte"
+                />
+              </View>
+
+              <Text style={[styles.appTitle, compact && styles.appTitleCompact]}>
+                Integrated Barangay{'\n'}Information System
+              </Text>
+              <Text style={styles.appSubtitle}>Municipality of Bato, Province of Leyte</Text>
+            </View>
+          </ImageBackground>
 
           {/* Puting card na nakapatong sa header */}
           <View style={styles.card}>
@@ -343,12 +455,32 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   header: {
+    // Nananatili ang berde sa ilalim ng larawan: iyon ang makikita habang
+    // hindi pa naibabalik ang litrato, at kapag hindi ito mabasa.
     backgroundColor: Colors.primary,
+    overflow: 'hidden',
+    borderBottomLeftRadius: Radius.header,
+    borderBottomRightRadius: Radius.header,
+  },
+  headerImage: {
+    borderBottomLeftRadius: Radius.header,
+    borderBottomRightRadius: Radius.header,
+  },
+  scrim: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  headerInner: {
     alignItems: 'center',
     paddingBottom: Spacing.xxl + Spacing.xl,
     paddingHorizontal: Spacing.xl,
-    borderBottomLeftRadius: Radius.header,
-    borderBottomRightRadius: Radius.header,
+  },
+  headerInnerCompact: {
+    // Sa masikip na screen, ang taas ang unang binabawasan.
+    paddingBottom: Spacing.xxl,
   },
   sealRing: {
     width: 112,
@@ -361,9 +493,18 @@ const styles = StyleSheet.create({
     borderWidth: 4,
     borderColor: Colors.primaryLight,
   },
+  sealRingCompact: {
+    width: 84,
+    height: 84,
+    marginBottom: Spacing.md,
+  },
   seal: {
     width: 92,
     height: 92,
+  },
+  sealCompact: {
+    width: 68,
+    height: 68,
   },
   appTitle: {
     fontSize: FontSize.xl,
@@ -371,6 +512,10 @@ const styles = StyleSheet.create({
     color: Colors.onPrimary,
     textAlign: 'center',
     lineHeight: 30,
+  },
+  appTitleCompact: {
+    fontSize: FontSize.lg,
+    lineHeight: 25,
   },
   appSubtitle: {
     marginTop: Spacing.sm,

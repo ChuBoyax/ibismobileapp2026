@@ -15,6 +15,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { TAB_BAR_HEIGHT } from '@/components/animated-tab-bar';
+import { FilterBar, type FilterGroup } from '@/components/filter-bar';
 import { ScreenHeader } from '@/components/screen-header';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '@/constants/theme';
 
@@ -55,6 +56,16 @@ type RecordListScreenProps = {
   error: string | null;
   search: string;
   onSearchChange: (value: string) => void;
+  /*
+    NAKIKITANG HANAY, HINDI NAKATAGONG SHEET.
+
+    Ang filter na nakatago sa likod ng isang icon ay madalas hindi nahahanap,
+    at mas masahol: kapag may naiwang naka-set, mukhang kulang ang listahan at
+    walang nakikitang dahilan. Sa nakikitang chip, laging nasa harap kung ano
+    ang sinasala — kaparehong paraan ng Reports.
+  */
+  filters?: FilterGroup[];
+  onClearFilters?: () => void;
   onRefresh: () => void;
 };
 
@@ -78,6 +89,8 @@ export function RecordListScreen({
   error,
   search,
   onSearchChange,
+  filters,
+  onClearFilters,
   onRefresh,
 }: RecordListScreenProps) {
   const router = useRouter();
@@ -86,7 +99,7 @@ export function RecordListScreen({
   return (
     <View style={styles.screen}>
       <StatusBar style="light" />
-      <ScreenHeader title={title} subtitle={subtitle} action="funnel-outline" />
+      <ScreenHeader title={title} subtitle={subtitle} />
 
       <View style={styles.toolbar}>
         <View style={styles.search}>
@@ -110,6 +123,10 @@ export function RecordListScreen({
           {loading ? 'Loading…' : `${total} record${total === 1 ? '' : 's'}`}
         </Text>
       </View>
+
+      {!!filters?.length && (
+        <FilterBar groups={filters} onClear={onClearFilters ?? (() => {})} />
+      )}
 
       {loading ? (
         <View style={styles.center}>
