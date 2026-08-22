@@ -11,7 +11,8 @@ import {
 } from '@/lib/api';
 import { isDeviceOnline } from '@/lib/connectivity';
 import { putCache, recordCacheKey } from '@/lib/db';
-import { enqueue, type OutboxType } from '@/lib/outbox';
+import { referencedUuids, resolveRefs } from '@/lib/local-refs';
+import { enqueue, outboxUuids, type OutboxType } from '@/lib/outbox';
 import { drain, refresh } from '@/lib/sync';
 
 /**
@@ -80,10 +81,43 @@ export async function saveRecord(input: SaveInput): Promise<SaveResult> {
     return { queued: true, reason: 'The server did not respond.' };
   }
 
+  /*
+    TUMUTUKOY BA ITO SA TALANG NASA PILA PA?
+
+    Nangyayari ito kapag gumawa ng sambahayan nang walang signal, tapos
+    bumalik ang signal bago pa naipadala iyon, at doon itinalaga ang residente.
+    Ang hawak ng payload ay pananda pa rin — walang id — kaya walang saysay
+    ang diretsong padala: 422 lang ang isasagot ng server at hindi mauunawaan
+    ng gumagamit kung bakit.
+
+    Ang tamang gawin ay isabay ito sa pila. Doon, ang sambahayan ang mauuna
+    at ang residente ay susunod na may tunay nang id — na siya ring
+    nangyayari kapag pareho silang ginawa nang walang signal.
+
+    Ang pila ay binabasa lang kapag may pananda talaga. Karamihan ng pag-save
+    ay wala, at walang dahilan para dagdagan silang lahat ng isang query.
+  */
+  const resolved = await resolveReferences(input.payload);
+
+  if (!resolved.ready) {
+    const reason =
+      'missing' in resolved
+        ? 'This points to a record that was discarded from the queue.'
+        : 'Waiting for the household or family it belongs to.';
+
+    await queue(input, reason);
+
+    // Kung nariyan naman ang signal, agad itong susubukan — mauuna ang
+    // tinutukoy, saka ito.
+    void drain();
+
+    return { queued: true, reason };
+  }
+
   try {
     if (input.recordId) {
       const { data } = await UPDATE[input.type](input.recordId, {
-        ...input.payload,
+        ...resolved.payload,
         ...(input.expectedUpdatedAt ? { expected_updated_at: input.expectedUpdatedAt } : {}),
       });
 
@@ -93,7 +127,7 @@ export async function saveRecord(input: SaveInput): Promise<SaveResult> {
       // ginawa, at aakalain ng user na nasayang ang trabaho niya.
       void putCache(recordCacheKey(input.type, input.recordId), data);
     } else {
-      await CREATE[input.type]({ ...input.payload, uuid: input.uuid });
+      await CREATE[input.type]({ ...resolved.payload, uuid: input.uuid });
     }
 
     return { queued: false };
@@ -124,6 +158,16 @@ export async function saveRecord(input: SaveInput): Promise<SaveResult> {
       reason: error instanceof Error ? error.message : 'Could not send the record.',
     };
   }
+}
+
+async function resolveReferences(payload: Record<string, unknown>) {
+  if (referencedUuids(payload).length === 0) {
+    return { ready: true, payload } as const;
+  }
+
+  const queued = await outboxUuids();
+
+  return resolveRefs(payload, (uuid) => queued.has(uuid));
 }
 
 async function queue(input: SaveInput, reason?: string) {

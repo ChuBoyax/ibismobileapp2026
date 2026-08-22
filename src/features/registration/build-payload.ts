@@ -5,6 +5,7 @@ import {
   type FormValues,
   type StepDef,
 } from '@/components/form/types';
+import { isLocalRef } from '@/lib/local-refs';
 
 /**
  * Ginagawang payload ng API ang mga sagot sa form.
@@ -69,6 +70,18 @@ function buildFrom(fields: FieldDef[], values: FormValues): Record<string, unkno
     }
 
     if (field.name.endsWith('_id')) {
+      // Tumutukoy sa talang nasa pila pa — walang id ito, uuid muna.
+      //
+      // DAPAT ITONG DUMAAN NANG BUO. Ang `Number()` nito ay NaN, kaya sa
+      // dating anyo ay tahimik itong nalalaglag: ang residenteng itinalaga sa
+      // kagagawang sambahayan ay darating sa server na walang sambahayan,
+      // nang walang anumang babala. Ang pagpapalit sa tunay na id ay
+      // nangyayari sa oras ng pagpapadala — tingnan ang `resolveRefs`.
+      if (isLocalRef(value)) {
+        payload[field.name] = value;
+        continue;
+      }
+
       const numeric = Number(value);
       if (Number.isFinite(numeric)) payload[field.name] = numeric;
       continue;
@@ -82,6 +95,10 @@ function buildFrom(fields: FieldDef[], values: FormValues): Record<string, unkno
 
 /** Id ng option kung numero, kung hindi ay ang mismong teksto. */
 function toIdOrText(value: string): number | string {
+  // Ang pananda ay dumadaan nang buo — papalitan ito ng tunay na id bago
+  // ipadala, at hindi ito teksto na dapat tanggapin ng server.
+  if (isLocalRef(value)) return value;
+
   const numeric = Number(value);
 
   return Number.isFinite(numeric) && value.trim() !== '' ? numeric : value;

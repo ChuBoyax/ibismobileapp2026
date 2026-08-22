@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 
 import { fetchOptions, listFamilies, listHouseholds, listResidents } from '@/lib/api';
 import { CacheKey, getCache, putCache } from '@/lib/db';
+import { pendingChoices } from '@/lib/outbox';
 
 import { EMPTY_SOURCES, type FormSources } from './sources';
 
@@ -74,7 +75,7 @@ export function useFormSources(needs: SourceNeeds = {}) {
 
       if (early && active && attempt === 0) {
         setState({
-          sources: early.sources,
+          sources: await withPending(early.sources, { households, families, residents }),
           loading: false,
           error: null,
           offline: true,
@@ -116,8 +117,16 @@ export function useFormSources(needs: SourceNeeds = {}) {
         if (familyList) putCache(CacheKey.formFamilies, sources.families);
         if (residentList) putCache(CacheKey.formResidents, sources.residents);
 
+        const shown = await withPending(sources, { households, families, residents });
+
         if (active) {
-          setState({ sources, loading: false, error: null, offline: false, fetchedAt: new Date() });
+          setState({
+            sources: shown,
+            loading: false,
+            error: null,
+            offline: false,
+            fetchedAt: new Date(),
+          });
         }
       } catch (error) {
         const cached = await readCache({ households, families, residents });
@@ -126,7 +135,7 @@ export function useFormSources(needs: SourceNeeds = {}) {
 
         if (cached) {
           setState({
-            sources: cached.sources,
+            sources: await withPending(cached.sources, { households, families, residents }),
             loading: false,
             error: null,
             offline: true,
@@ -156,6 +165,34 @@ export function useFormSources(needs: SourceNeeds = {}) {
   }, [households, families, residents, attempt]);
 
   return { ...state, reload: () => setAttempt((count) => count + 1) };
+}
+
+/**
+ * Idinaragdag ang mga talang nasa pila pa sa mapagpipilian.
+ *
+ * ITO ANG NAGPAPAGANA SA PAG-ENCODE NG BUONG SAMBAHAYAN NANG WALANG SIGNAL.
+ * Ang naka-cache na listahan ay galing sa server, kaya ang sambahayang
+ * kagagawa lang sa bahay na ito ay wala roon. Kung iyon lang ang ipapakita,
+ * ang enumerator ay may bagong sambahayan na hindi niya matukoy — at ang
+ * tanging magagawa niya ay hintayin ang signal, gayong iyon mismo ang
+ * iniiwasan.
+ *
+ * Nauuna ang mga nasa pila. Sila ang kababuo lang at malamang sila ang
+ * hinahanap; ang daan-daang galing sa server ay nasa ilalim, gaya ng dati.
+ */
+async function withPending(sources: FormSources, needs: Required<SourceNeeds>) {
+  const [households, families, residents] = await Promise.all([
+    needs.households ? pendingChoices('household') : [],
+    needs.families ? pendingChoices('family') : [],
+    needs.residents ? pendingChoices('resident') : [],
+  ]);
+
+  return {
+    ...sources,
+    households: [...households, ...sources.households],
+    families: [...families, ...sources.families],
+    residents: [...residents, ...sources.residents],
+  };
 }
 
 /**
