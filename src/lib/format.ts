@@ -1,7 +1,4 @@
-/**
- * Ginagawang "10 minutes ago" ang ISO timestamp mula sa server.
- * Kapag lampas isang linggo na, petsa na lang ang ipinapakita.
- */
+
 export function relativeTime(iso: string) {
   const then = new Date(iso).getTime();
 
@@ -9,7 +6,6 @@ export function relativeTime(iso: string) {
 
   const seconds = Math.floor((Date.now() - then) / 1000);
 
-  // Maaaring bahagyang mauna ang orasan ng server sa cellphone.
   if (seconds < 60) return 'Just now';
 
   const minutes = Math.floor(seconds / 60);
@@ -29,7 +25,6 @@ export function relativeTime(iso: string) {
   });
 }
 
-/** 1248 -> "1,248" */
 export function formatNumber(value: number) {
   return value.toLocaleString('en-US');
 }

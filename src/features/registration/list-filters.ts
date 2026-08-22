@@ -1,15 +1,7 @@
 import type { FilterGroup, FilterOption } from '@/components/filter-bar';
 import type { BarangayChoice, ListFilters, OptionGroups } from '@/lib/api';
 
-/**
- * Ginagawang pagpipilian sa filter ang mga option na galing sa server.
- *
- * ANG PINAGMULAN AY ANG NAKA-TABI NANG /options — iyon din ang ginagamit ng
- * registration form, at naitatago na sa cellphone bago pa man mawalan ng
- * signal. Kaya gumagana ang chip offline nang hindi kailangan ng sariling
- * pagkuha: ang listahan ng purok na napili mo sa bundok ay ang parehong
- * listahang nakita mo sa opisina.
- */
+
 export function choicesFrom(
   options: OptionGroups,
   key: string,
@@ -23,17 +15,7 @@ export function choicesFrom(
   ];
 }
 
-/**
- * Tumugma ba ang tala sa isang salain, kapag walang koneksyon?
- *
- * Ang tuntunin ay simple at pare-pareho: kung ang tala ay may field na
- * kaparehong pangalan ng salain, dapat magkatugma ang halaga. Ang hindi
- * napipiling salain (null) ay hindi sumasala.
- *
- * Ang paghahambing ay sa teksto, hindi sa uri. Ang id na galing sa naka-save
- * na JSON ay minsang numero at minsang teksto — hindi dapat maging dahilan
- * iyon para maglaho ang tala sa listahan.
- */
+
 export function matchesById(
   item: Record<string, unknown>,
   filters: ListFilters,
@@ -48,17 +30,7 @@ export function matchesById(
   });
 }
 
-/**
- * Ang mga sektor na kayang salain ng listahan ng residente.
- *
- * Hindi ito dropdown sa database kundi hanay ng magkakahiwalay na boolean na
- * column. Iisang chip ang ipinapakita — "alin sa mga pangkat" — dahil ang
- * limang magkakahiwalay na switch ay mas mahirap unawain kaysa sa isang
- * tanong na may malinaw na sagot.
- *
- * Ang susi ay siya ring ipinapadala sa server; ang column ay ang tugma nito
- * sa naka-save na tala kapag walang signal.
- */
+
 export const RESIDENT_SECTORS: { key: string; label: string; column: string }[] = [
   { key: 'senior', label: 'Senior citizens', column: 'senior' },
   { key: 'pwd', label: 'Persons with disability', column: 'pwd' },
@@ -73,7 +45,7 @@ export const SECTOR_CHOICES: FilterOption[] = [
   ...RESIDENT_SECTORS.map((sector) => ({ value: sector.key, label: sector.label })),
 ];
 
-/** Totoo kapag kabilang ang residente sa napiling sektor. */
+
 export function matchesSector(item: Record<string, unknown>, value: unknown): boolean {
   if (value === null || value === undefined || value === '') return true;
 
@@ -82,16 +54,7 @@ export function matchesSector(item: Record<string, unknown>, value: unknown): bo
   return sector ? item[sector.column] === true : true;
 }
 
-/**
- * Ang salain ng barangay, para sa may maraming nasasakupan.
- *
- * LUMALABAS LANG KAPAG MAY TUNAY NA PAGPIPILIAN. Sa may iisang barangay, ang
- * chip na "All barangays" ay walang sinasabi — laging iisa ang sagot, at ang
- * pindutang walang epekto ay nagpapabigat lang sa screen.
- *
- * Nauuna ito sa hanay dahil ito ang pinakamalawak: pinipili muna kung saan,
- * saka kung sino.
- */
+
 export function barangayGroup(
   choices: BarangayChoice[],
   selected: string | number | null,

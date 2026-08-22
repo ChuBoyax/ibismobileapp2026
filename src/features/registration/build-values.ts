@@ -5,26 +5,6 @@ import {
   type StepDef,
 } from '@/components/form/types';
 
-/**
- * Ginagawang sagot sa form ang talang galing sa server.
- *
- * Ito ang kabaligtaran ng `buildPayload`. Kapag pinindot ang isang tala sa
- * listahan, bumubukas ang parehong labing-isang hakbang na form — pero puno
- * na ng dating datos, kaya ang pag-edit ng isang numero ng telepono ay hindi
- * nangangahulugang muling pag-eencode ng lahat.
- *
- * Apat na bagay ang kailangang ibalik sa dating anyo:
- *  1. Teksto ang lahat sa form, kahit numero ang laman ng database.
- *  2. YYYY-MM-DD (o buong timestamp) patungong MM/DD/YYYY.
- *  3. Ang mga hasMany na ugnayan ay nagiging laman ng repeater.
- *  4. Ang mga option ay itinutugma sa id — at kapag pangalan ang nakaimbak,
- *     sa pangalan hinahanap ang id.
- *
- * ANG LARAWAN AY SADYANG HINDI IBINABALIK. Ang hawak ng server ay URL, hindi
- * file; kung ipapadala iyon pabalik, tatanggihan ito ng panuntunang `image`
- * at magiging 422 ang buong pag-save. Wala namang mawawala: hindi hinahawakan
- * ng backend ang dating litrato kapag walang bagong ipinadala.
- */
 export function buildValues(steps: StepDef[], record: Record<string, unknown>): FormValues {
   return valuesFrom(steps.flatMap(fieldsOfStep), record);
 }
@@ -33,11 +13,10 @@ function valuesFrom(fields: FieldDef[], record: Record<string, unknown>): FormVa
   const values: FormValues = {};
 
   for (const field of fields) {
-    // Sa server nagmumula ang opisyal na halaga ng mga ito — muli itong
-    // kinakalkula ng form mula sa ibang sagot.
+   
     if (field.type === 'computed') continue;
 
-    // Tingnan ang paliwanag sa itaas: URL ang hawak ng server, hindi file.
+   
     if (field.type === 'image') continue;
 
     const raw = record[field.name];
@@ -57,8 +36,7 @@ function valuesFrom(fields: FieldDef[], record: Record<string, unknown>): FormVa
     }
 
     if (field.type === 'multiselect') {
-      // Minsan iisang halaga lang ang nakaimbak imbes na array — ang lumang
-      // `citizenship` ay teksto lang na "Filipino". Ipinapasok pa rin ito.
+     
       const list = Array.isArray(raw) ? raw : raw === null || raw === undefined ? [] : [raw];
 
       values[field.name] = list
@@ -89,19 +67,11 @@ function valuesFrom(fields: FieldDef[], record: Record<string, unknown>): FormVa
   return values;
 }
 
-/**
- * Ang naiimbak na halaga patungo sa halaga ng option.
- *
- * Karaniwan ay tuwiran ang tugma — id sa id. Pero may lumang tala kung saan
- * pangalan ang naiimbak sa halip na id (`citizenship` ay "Filipino"), kaya
- * hinahanap din ito sa mga label. Kung hindi tumugma kahit saan, wala:
- * mas mabuting blangkong dropdown na sasagutin ng user kaysa idang hindi
- * naman pala tumutukoy sa anuman.
- */
+
 function toOptionValue(field: FieldDef, raw: unknown): string | null {
   if (raw === null || raw === undefined) return null;
 
-  // Ang naka-nest na object ay galing sa ugnayan (`purok: { id, name }`).
+ 
   const value =
     typeof raw === 'object'
       ? ((raw as Record<string, unknown>).id ?? (raw as Record<string, unknown>).value ?? null)
@@ -120,7 +90,7 @@ function toOptionValue(field: FieldDef, raw: unknown): string | null {
   return byLabel ? byLabel.value : null;
 }
 
-/** Tumatanggap ng 1, "1", true at "true" — magkakaiba ang pinagmulan nila. */
+
 function isTruthy(value: unknown): boolean {
   if (typeof value === 'boolean') return value;
   if (typeof value === 'number') return value !== 0;
@@ -129,11 +99,7 @@ function isTruthy(value: unknown): boolean {
   return false;
 }
 
-/**
- * YYYY-MM-DD patungong MM/DD/YYYY. Tinatanggap din ang buong timestamp
- * ("2026-08-07T04:00:55.000000Z") dahil ganoon ibinabalik ng Laravel ang
- * ilang column.
- */
+
 function toFormDate(raw: unknown): string | null {
   if (typeof raw !== 'string') return null;
 

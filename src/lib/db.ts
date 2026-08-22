@@ -1,38 +1,6 @@
 import * as SQLite from 'expo-sqlite';
-
-/**
- * Lokal na cache ng app.
- *
- * MAHALAGA — HINDI NAKA-ENCRYPT ANG SQLITE SA EXPO GO (walang SQLCipher).
- * Kaya dito ay datos lang na ipinapakita ang inilalagay: dashboard, abiso,
- * at mamaya ang listahan ng residente at household. Ang token, PIN hash at
- * anumang sensitibo ay nasa expo-secure-store — doon lang, kasi naka-encrypt
- * iyon ng Android Keystore / iOS Keychain.
- *
- * Isang simpleng key-value table lang ang gamit. Sapat na ito para sa mga
- * buong sagot ng API, at madaling dagdagan ng tunay na table kapag kailangan
- * nang mag-query at mag-filter ng listahan offline.
- */
-
 const DB_NAME = 'ibis.db';
 
-/**
- * ANG PROMISE ANG ITINATAGO, HINDI ANG RESULTA — at mahalaga ang pagkakaiba.
- *
- * Dati, ang naka-bukas nang database ang itinatago. Pero sa pagitan ng
- * pagsisimula ng pagbukas at ng pagkakatago nito, ang sinumang tumawag ay
- * makikitang wala pa — kaya magbubukas siya ng PANGALAWANG koneksyon at
- * uulitin ang paggawa ng table. Mas masahol: may makakakuha ng database bago
- * pa matapos ang CREATE TABLE, at magtatanong sa table na wala pa.
- *
- * Nangyayari ito sa pagbukas ng app, kung saan sabay-sabay na humihingi ang
- * dashboard, ang sync engine, at ang profile. Paminsan-minsan lang ito
- * bumabagsak — kaya mahirap hulihin at madaling isipin na ibang bagay ang sira.
- *
- * Sa pagtatago ng promise, iisa lang ang tunay na pagbukas gaano man karami
- * ang sabay na humingi. Kapag nabigo, binubura ito para may pag-asa pa ang
- * susunod na subok.
- */
 let databasePromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
 function open(): Promise<SQLite.SQLiteDatabase> {
@@ -140,19 +108,7 @@ async function initialise(): Promise<SQLite.SQLiteDatabase> {
   return db;
 }
 
-/**
- * Dinaragdagan ang `outbox` ng dalawang column na kailangan ng pag-edit.
- *
- * MAY APP NA SA CELLPHONE NG MGA GUMAGAMIT, at may naka-queue nang tala doon.
- * Kaya hindi puwedeng basta ipalit ang bagong CREATE TABLE — mananatili ang
- * lumang anyo at mabibigo ang bawat pagsingit. Dinaragdagan na lang ang
- * kulang, at ang mga dating naka-queue ay mananatiling paglikha (walang
- * `record_id`) tulad ng inaasahan nila.
- *
- *   record_id           — alin ang binabago; kapag wala, paglikha ito
- *   expected_updated_at — kailan huling nagbago ang tala nang kunin ito, kaya
- *                         natutukoy kung may ibang nakaunang magpalit
- */
+
 async function addOutboxEditColumns(db: SQLite.SQLiteDatabase): Promise<void> {
   const columns = await db.getAllAsync<{ name: string }>('PRAGMA table_info(outbox)');
   const existing = new Set(columns.map((column) => column.name));
@@ -166,21 +122,16 @@ async function addOutboxEditColumns(db: SQLite.SQLiteDatabase): Promise<void> {
   }
 }
 
-/** Ibinubukas ang database para magamit ng ibang module (outbox, sync). */
 export async function getDatabase() {
   return open();
 }
 
 export type Cached<T> = {
   value: T;
-  /** Kailan ito huling nakuha mula sa server. */
   updatedAt: Date;
 };
 
-/**
- * Iniimbak ang huling matagumpay na sagot ng server.
- * Hindi nagpapasabog kapag nabigo — cache lang naman ito.
- */
+
 export async function putCache(key: string, value: unknown): Promise<void> {
   try {
     const db = await open();
@@ -192,13 +143,11 @@ export async function putCache(key: string, value: unknown): Promise<void> {
       Date.now()
     );
   } catch {
-    // Kung hindi makasulat, tuloy pa rin ang app — mawawalan lang ng offline copy.
+   
   }
 }
 
-/**
- * Kinukuha ang huling naka-imbak na sagot. Null kung wala pa.
- */
+
 export async function getCache<T>(key: string): Promise<Cached<T> | null> {
   try {
     const db = await open();
@@ -219,88 +168,55 @@ export async function getCache<T>(key: string): Promise<Cached<T> | null> {
   }
 }
 
-/** Tinatanggal ang isang entry — halimbawa kapag na-clear ang notifications. */
+
 export async function removeCache(key: string): Promise<void> {
   try {
     const db = await open();
     await db.runAsync('DELETE FROM cache WHERE key = ?', key);
   } catch {
-    // walang anuman
+   
   }
 }
 
-/**
- * Binubura ang datos ng user — dashboard, abiso, ulat — pero PINAPANATILI ang
- * laman ng registration form.
- *
- * Ang laman ng form ay listahan ng barangay (purok, civil status, household),
- * hindi pag-aari ng sinumang user. Kung buburahin ito sa bawat logout, hindi
- * na bubukas ang form sa susunod na pagpasok kung walang signal — at iyon
- * mismo ang sandaling pinakakailangan ito.
- */
+
 export async function clearUserCache(): Promise<void> {
   try {
     const db = await open();
     await db.runAsync("DELETE FROM cache WHERE key NOT LIKE 'form.%'");
   } catch {
-    // walang anuman
+   
   }
 }
 
-/**
- * Binubura ang lahat ng naka-cache, kasama ang laman ng form. Para sa tuluyang
- * pag-alis sa device, kung saan maaaring iba na ang susunod na gagamit.
- */
+
 export async function clearCache(): Promise<void> {
   try {
     const db = await open();
     await db.runAsync('DELETE FROM cache');
   } catch {
-    // walang anuman
+   
   }
 }
 
-/** Mga key na ginagamit sa buong app. */
+
 export const CacheKey = {
   dashboard: 'dashboard',
   notifications: 'notifications',
   dismissedNotifications: 'notifications.dismissed',
   reports: 'reports',
 
-  /*
-    Ang kailangan ng registration form bago pa ito lumitaw. Kung wala nito,
-    hindi mabubuksan ang form nang walang signal — at walang saysay ang
-    offline na pag-save kung hindi mo naman maabot ang form.
-  */
+ 
   formOptions: 'form.options',
   formHouseholds: 'form.households',
   formFamilies: 'form.families',
   formResidents: 'form.residents',
 
-  /*
-    Laman ng tatlong tab na listahan. Ang walang hanap lang ang itinatabi —
-    ang resulta ng paghahanap ay panandalian at hindi kapaki-pakinabang offline.
-  */
+  
   listResidents: 'list.residents',
   listFamilies: 'list.families',
   listHouseholds: 'list.households',
 } as const;
 
-/**
- * Ang buong tala ng isang residente/sambahayan/pamilya, para sa pag-edit.
- *
- * BUOD LANG ANG NASA LISTAHAN — pangalan, purok, edad. Hindi sapat iyon para
- * punuin ang labing-isang hakbang ng form. Kaya sa bawat pagbukas ng isang
- * tala habang may signal, itinatabi ang buong laman nito: kapag nasa bundok
- * na ang enumerator at kailangang itama ang isang numero, nariyan pa rin.
- */
-/**
- * Sariling susi kada napiling barangay sa dashboard.
- *
- * Kung iisa lang ang susi, ang bilang ng isang barangay ay maipapakita habang
- * nakasulat sa chip ang pangalan ng iba — at ang numerong mukhang totoo pero
- * mali ay mas mapanganib kaysa sa walang numero.
- */
 export function dashboardCacheKey(barangayId: number | null): string {
   return barangayId ? `${CacheKey.dashboard}:${barangayId}` : CacheKey.dashboard;
 }
@@ -309,20 +225,7 @@ export function recordCacheKey(type: string, id: number | string): string {
   return `record.${type}.${id}`;
 }
 
-/**
- * Sariling susi kada kombinasyon ng filter sa ulat.
- *
- * BAKIT HINDI IISA LANG ANG SUSI. Ang itinatago ng ulat ay BUOD na bilang,
- * hindi hilaw na tala — kaya hindi ito kayang salain sa cellphone tulad ng
- * ginagawa natin sa listahan. Kung iisa lang ang susi, ang pagpili ng purok
- * habang walang koneksyon ay magpapakita ng bilang ng BUONG barangay habang
- * nakasulat sa chip na "Purok 1". Mas masahol pa iyon kaysa walang ipakita:
- * mukhang totoo ang numero, pero mali.
- *
- * Sa hiwalay na susi, ang nakita mo nang kombinasyon habang online ay
- * mababalikan mo offline — at ang hindi pa nakikita ay malinaw na sasabihing
- * kailangan ng koneksyon.
- */
+
 export function reportCacheKey(filters: {
   barangay_id?: number | null;
   purok_id?: number | null;

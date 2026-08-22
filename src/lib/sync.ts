@@ -27,22 +27,6 @@ import {
   type OutboxType,
 } from '@/lib/outbox';
 
-/**
- * Sync engine — inihahatid ang mga naka-queue na tala kapag may koneksyon.
- *
- * ANG PAG-UURI NG PAGKABIGO ANG BUONG PUNTO NITO. Ang paulit-ulit na retry sa
- * lahat ng pagkakamali ay hindi sync engine — pag-aaksaya iyon ng baterya at
- * paraan para tahimik na mawala ang datos. Tatlong uri ang pinagkakaiba dito:
- *
- *   pansamantala  (walang signal, server down) → subukan ulit mamaya
- *   permanente    (maling datos, sobrang laki) → itigil, ipaayos sa tao
- *   auth          (nawalan ng bisa ang token)  → ihinto lahat, maghintay ng login
- *
- * Kung hindi pinaghiwalay ang mga ito, ang talang may maling petsa ay
- * paulit-ulit na susubukan magpakailanman, at ang talang naantala lang ng
- * mahinang signal ay maaaring itapon nang wala sa panahon.
- */
-
 const CREATE: Record<
   OutboxType,
   (
@@ -64,35 +48,12 @@ const UPDATE: Record<
   family: updateFamily,
 };
 
-/**
- * Mahaba ang hinihintay ng pila — walang nanonood dito.
- *
- * Sa pag-save, mabilis tayong sumusuko para hindi maghintay ang user. Dito,
- * kabaligtaran ang tama: ang layunin ay makarating talaga ang tala, gaano man
- * kabagal ang signal. Kung paiikliin din ito, ang talang may larawan ay
- * mabibigo sa bawat pagsubok at hindi kailanman maipapadala.
- */
-const SYNC_TIMEOUT_MS = 120_000;
 
-/** Hanggang ilang subok bago tumigil sa pansamantalang pagkabigo. */
+const SYNC_TIMEOUT_MS = 120_000;
 const MAX_ATTEMPTS = 8;
 
-/** Ilang tala ang sabay na ipinapadala. Tingnan ang paliwanag sa `drain`. */
 const CONCURRENCY = 3;
 
-/**
- * Kusang pag-uulit habang may naiwan sa pila.
- *
- * Hindi sapat ang paghihintay ng "pagbalik ng koneksyon": maraming pagkakataon
- * na konektado ka naman pero hindi pa rin maipadala — patay o nagre-restart
- * ang server, mahina ang signal, o may captive portal ang WiFi. Sa mga iyon,
- * walang network transition na mangyayari at mananatiling naghihintay ang pila.
- *
- * Nagsisimula sa maikling pagitan at dumadoble hanggang sa hangganan, kaya
- * mabilis makabawi kapag panandalian lang ang problema, at hindi naman
- * nagsasayang ng baterya kapag matagal. Bumabalik sa maikli kapag may
- * naipadala o kapag may bagong koneksyon.
- */
 const FIRST_RETRY_MS = 15_000;
 const MAX_RETRY_MS = 5 * 60_000;
 
@@ -101,15 +62,8 @@ type Listener = (state: SyncState) => void;
 export type SyncState = {
   running: boolean;
   counts: OutboxCounts;
-  /**
-   * Ilan ang naipadala sa katatapos lang na pagsubok.
-   *
-   * DITO GALING ANG PATUNAY NG TAGUMPAY. Kung wala nito, ang tanging
-   * nakikita ng user ay ang paglaho ng laman ng pila — kaparehong hitsura ng
-   * talang tahimik na nawala. Ang bilang na ito ang nagpapaiba sa dalawa.
-   */
+ 
   justSynced: number;
-  /** Kailan huling may naipadala. Null kung wala pa sa buhay ng app na ito. */
   lastSyncAt: Date | null;
 };
 
@@ -117,13 +71,12 @@ let running = false;
 let listeners: Listener[] = [];
 let lastCounts: OutboxCounts = { pending: 0, syncing: 0, needsFix: 0, conflicts: 0, total: 0 };
 
-/** Bilang ng naipadala sa kasalukuyan o katatapos na drain. */
 let justSynced = 0;
 let lastSyncAt: Date | null = null;
 
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let retryDelay = FIRST_RETRY_MS;
-/** Nawalan ng bisa ang token — walang saysay mag-ulit hangga't di nakaka-login. */
+
 let pausedForAuth = false;
 
 function scheduleRetry() {
@@ -144,21 +97,13 @@ function cancelRetry() {
   retryDelay = FIRST_RETRY_MS;
 }
 
-/**
- * Hawak sa screen habang may ipinapadala.
- *
- * Iisa ang tatak na ginagamit at itinatala kung hawak na ba — kaya kahit
- * ilang beses tawagin, isang hawak lang ang mabubuo at isang bitaw lang ang
- * kailangan. Kung magkakaiba ang bilang ng hawak at bitaw, mananatiling gising
- * ang screen kahit tapos na ang sync, at ang baterya ang magbabayad.
- */
+
 const KEEP_AWAKE_TAG = 'ibis-sync';
 
 let screenHeld = false;
 
 async function holdScreenAwake(hold: boolean) {
-  // Habang nakabukas lang ang app. Sa background, ang pipigilin natin ay ang
-  // screen ng ibang ginagawa ng may-ari — hindi natin iyon karapatan.
+
   const wanted = hold && AppState.currentState === 'active';
 
   if (wanted === screenHeld) return;
@@ -169,9 +114,7 @@ async function holdScreenAwake(hold: boolean) {
 
     screenHeld = wanted;
   } catch {
-    // Hindi ito dapat magpabagsak ng sync. Ang tanging bunga ng pagkabigo ay
-    // maagang pag-lock ng screen, at may pambawi naman doon: magpapatuloy ang
-    // pila sa susunod na pagbukas ng app.
+   
   }
 }
 
@@ -183,37 +126,16 @@ export function subscribe(listener: Listener): () => void {
     listeners = listeners.filter((item) => item !== listener);
   };
 }
-
-/**
- * MAY TAKDA ANG DALAS NG PAG-AABISO.
- *
- * Bawat abiso ay nagpapabasa muli ng listahan sa bawat nakikinig. Kapag sampu
- * ang nasa pila, hindi ito mahalaga. Kapag isang daan at mabilis na
- * nagkakasunuran ang mga pagbabago — halimbawa, kapag pawang nawawala ang
- * larawan at agad-agad na tinatabi ang bawat tala — nagiging daan-daang
- * pagbasa ito sa loob ng ilang sandali, at ang screen mismo ang huminto sa
- * pagtugon habang tumatakbo ang sync.
- *
- * Kaya isang abiso lang kada agwat. Ang una ay agad na dumadaan para hindi
- * mukhang tulog ang app, at ang huling kalagayan ay tiyak na naipapaalam sa
- * bandang huli sa pamamagitan ng `publishNow`.
- */
 const PUBLISH_INTERVAL_MS = 400;
 
 let publishTimer: ReturnType<typeof setTimeout> | null = null;
 let publishQueued = false;
-/**
- * Sinusundan kung alin ang pinakabagong pagbabasa. Ang bilang ay hinihintay,
- * kaya maaaring maunang matapos ang lumang pagbasa kaysa sa bago — at kung
- * hindi ito babantayan, ang lumang bilang ang mananatili sa screen.
- */
 let publishSeq = 0;
 
 async function emit() {
   const seq = ++publishSeq;
   const next = await counts();
 
-  // May mas bagong pagbasa nang naunahan ito — luma na ang hawak nito.
   if (seq < publishSeq) return;
 
   lastCounts = next;
@@ -227,10 +149,6 @@ function publish() {
     publishQueued = true;
     return;
   }
-
-  // Hindi ito hinihintay, kaya walang tatanggap ng error nito. Ang isang
-  // screen na sumasablay sa pagtanggap ng abiso ay hindi dapat makapagpahinto
-  // ng pagpapadala — ipinagpapatuloy ang pila kahit may nabigong nakikinig.
   void emit().catch(() => {});
 
   publishTimer = setTimeout(() => {
@@ -242,8 +160,6 @@ function publish() {
     }
   }, PUBLISH_INTERVAL_MS);
 }
-
-/** Walang antala at hinihintay — para sa kalagayang dapat tumpak kaagad. */
 async function publishNow() {
   if (publishTimer) clearTimeout(publishTimer);
 
@@ -257,28 +173,20 @@ export async function refresh() {
   await publishNow();
 }
 
-
-/**
- * Ang kalabasan ng isang padala — ito ang nagsasabi kung dapat pang
- * ipagpatuloy ang natitira sa pila.
- */
 type Outcome =
-  /** Naipadala na o naitabi na para sa tao. Tuloy ang iba. */
+ 
   | 'settled'
-  /**
-   * May tinutukoy itong talang nasa pila pa. Hindi ito pagkakamali at hindi
-   * ito bumibilang na subok — mauuna lang ang tinutukoy, saka ito babalikan.
-   */
+ 
   | 'deferred'
-  /** Nawalan ng bisa ang token — walang saysay ang natitira. */
+  
   | 'auth'
-  /** Hindi maabot ang server — walang saysay ang natitira. */
+ 
   | 'unreachable';
 
-/** Isang tala: mula sa pagsusuri hanggang sa pagtatala ng kinalabasan. */
+
 async function send(
   item: OutboxItem,
-  /** Nasa pila pa ba ang uuid na ito? Dito nakikilala ang naghihintay sa nawawala. */
+  
   queued: (uuid: string) => boolean
 ): Promise<Outcome> {
   if (item.attempts >= MAX_ATTEMPTS) {
@@ -290,12 +198,7 @@ async function send(
     return 'settled';
   }
 
-  // Tsek bago ipadala: nariyan pa ba ang larawan?
-  //
-  // Kapag wala, babagsak ang pagpapadala sa antas ng network at ang
-  // ipapakita ay "Cannot reach the server" — na magtutulak sa user na
-  // habulin ang signal gayong ang file pala ang nawawala. Wala ring
-  // darating na request sa backend, kaya walang makikita sa logs.
+ 
   const missing = missingPhotos(item.payload);
 
   if (missing.length > 0) {
@@ -307,20 +210,12 @@ async function send(
     return 'settled';
   }
 
-  /*
-    PINAPALITAN ANG PANANDA NG TUNAY NA ID BAGO IPADALA.
-
-    Ang residenteng ginawa sa bahay na walang signal ay maaaring nakatalaga sa
-    sambahayang nasa pila rin. Habang wala pang id ang sambahayan, hindi pa
-    maipapadala ang residente — pero hindi rin ito pagkakamali: kailangan lang
-    munang makarating ang sambahayan. Tingnan ang `resolveRefs`.
-  */
+ 
   const resolution = await resolveRefs(item.payload, queued);
 
   if (!resolution.ready) {
     if ('missing' in resolution) {
-      // Itinapon ng gumagamit ang tinutukoy. Walang paghihintay na
-      // makapagbabago nito — kailangan na siyang pumili ng iba.
+     
       await setStatus(item.uuid, 'needs_fix', {
         error:
           'This record points to a household or family that was discarded from the queue. ' +
@@ -330,8 +225,6 @@ async function send(
       return 'settled';
     }
 
-    // Nasa pila pa ang tinutukoy — ibabalik ito sa susunod na hakbang.
-    // Sinasadyang walang `countAttempt`: walang nabigo rito.
     await setStatus(item.uuid, 'pending', {
       error: 'Waiting for the household or family it belongs to.',
     });
@@ -346,9 +239,6 @@ async function send(
 
   try {
     if (item.recordId) {
-      // Pagbabago ng umiiral nang tala. Kasama ang bersyon nang huli
-      // itong buksan, kaya masasabi ng server kung may ibang nakaunang
-      // magpalit habang wala tayong signal.
       await UPDATE[item.type](
         item.recordId,
         item.expectedUpdatedAt
@@ -358,23 +248,9 @@ async function send(
       );
     } else {
       const created = await CREATE[item.type](payload, { timeout: SYNC_TIMEOUT_MS });
-
-      // ITINATALA ANG NAGING ID BAGO ANG ANUMANG IBA PA.
-      //
-      // Dito nakasalalay ang mga talang naghihintay pa sa pila: hangga't
-      // hindi nakikilala ang uuid na ito, hindi sila maipapadala. Kung ito ay
-      // ipagpapaliban hanggang matapos ang buong drain, ang residenteng
-      // nakatalaga sa sambahayang ito ay maghihintay pa ng isa pang pagsubok
-      // gayong nariyan na naman ang kailangan niya.
       await rememberId(item.uuid, item.type, created.data.id);
     }
 
-    // Tagumpay — kasama ang kaso ng "naipadala na dati", dahil 200 rin
-    // ang isinasagot ng server doon.
-    //
-    // Ang talaan muna bago ang pagbura: kung babaligtarin, may sandaling
-    // wala ito sa pila at wala rin sa talaan — at kung doon mamatay ang
-    // app, mawawalan ng bakas ang talang naipadala naman talaga.
     await recordSynced({
       uuid: item.uuid,
       type: item.type,
@@ -387,61 +263,39 @@ async function send(
 
     justSynced += 1;
     lastSyncAt = new Date();
-
-    // Gumagana pala ang koneksyon — ibalik sa maikling pagitan para
-    // mabilis maabot ang natitira.
     retryDelay = FIRST_RETRY_MS;
 
     return 'settled';
   } catch (error) {
     const status = error instanceof ApiError ? error.status : -1;
-    // Ang Sync queue ang tanging lugar kung saan kapaki-pakinabang ang
-    // teknikal na detalye — dito pumupunta ang naghahanap ng dahilan.
-    // Sa ibang screen, ang malinis na mensahe lang ang lumalabas.
     const friendly = error instanceof Error ? error.message : 'Sync failed.';
     const raw = error instanceof ApiError ? error.detail : undefined;
     const message = raw && raw !== friendly ? `${friendly} (${raw})` : friendly;
 
     if (status === 401) {
-      // Wala nang bisa ang token. Walang saysay ipagpatuloy — ibabalik
-      // sa pending at hihinto, ipagpapatuloy pagkatapos mag-login.
       await setStatus(item.uuid, 'pending', { error: message });
       return 'auth';
     }
 
     if (status === 409) {
-      // May ibang nagpalit ng parehong tala. Hindi ito kayang pagpasiyahan
-      // ng app: ang dalawang bersyon ay parehong sinadya ng tao. Kaya
-      // hinihinto ito at inilalagay sa Sync queue, kung saan pipili ang
-      // gumagamit kung alin ang mananaig. Hindi ito bumibilang bilang
-      // subok — hindi naman ito maaayos ng pag-uulit.
       await setStatus(item.uuid, 'conflict', { error: message });
       return 'settled';
     }
 
     if (status === 422 || status === 413) {
-      // Hindi maaayos ng pag-uulit — kailangan ng tao.
       await setStatus(item.uuid, 'needs_fix', { error: message, countAttempt: true });
       return 'settled';
     }
 
-    // Pansamantala: walang signal (0) o problema sa server (5xx).
     await setStatus(item.uuid, 'pending', { error: message, countAttempt: true });
-
-    // Kung hindi maabot ang server, walang saysay ipagpatuloy ang iba.
     return status === 0 ? 'unreachable' : 'settled';
   }
 }
 
-/**
- * Ipinapadala ang lahat ng naghihintay. Ligtas tawagin kahit kailan —
- * kung may tumatakbo nang drain, agad itong babalik.
- */
 export async function drain(): Promise<void> {
   if (running) return;
 
   running = true;
-  // Bagong pagsubok, bagong bilang — hindi dala ang tagumpay ng nakaraan.
   justSynced = 0;
   await publishNow();
 
@@ -449,58 +303,15 @@ export async function drain(): Promise<void> {
     if (!(await isDeviceOnline())) return;
 
     const items = await pending();
-
-    // Pinipigilang matulog ang screen habang may ipinapadala.
-    //
-    // Nasa JavaScript thread lang ang pagpapadala — kapag na-lock ang
-    // telepono, hihinto ang JavaScript at kasama nito ang pila. Sa sampung
-    // tala, tapos na bago pa maabot ang lock. Sa isang daang tala, ibinababa
-    // ng enumerator ang telepono, nagla-lock ito pagkalipas ng kalahating
-    // minuto, at ang matatagpuan niya mamaya ay pilang tumigil sa ikawalo.
-    //
-    // Ang pagpigil ay habang nakabukas lang ang app. Kapag nasa background ito,
-    // hindi natin dapat pigilin ang screen ng ibang ginagawa ng may-ari.
     await holdScreenAwake(items.length > 0);
-
-    /** Kapag may nakitang dahilan para ihinto lahat, dito ito nakasulat. */
     let halt: 'auth' | 'unreachable' | null = null;
 
-    // Alin ang nasa pila — dito nakikilala ang talang hinihintay pa sa talang
-    // itinapon na. Kinukuha nang minsan lang: ang mawawala rito habang
-    // tumatakbo ay ang mga naipadala na, at kilala naman sila sa id nila.
     const known = await outboxUuids();
     const queued = (uuid: string) => known.has(uuid);
 
-    /*
-      MAGKAKASABAY NA PADALA, PERO SUNOD-SUNOD ANG MAGKAKAUGNAY.
-
-      Ang isa-isang padala ay halos puro paghihintay: bawat tala ay may sariling
-      handshake, paghihintay sa server, at pagsagot. Habang naghihintay ang isa,
-      walang ginagawa ang koneksyon — at sa isang daang tala, ang mga
-      paghihintay na iyon ang bumubuo sa kalakhan ng oras, hindi ang mismong
-      paglipat ng datos.
-
-      Tatlo lang at hindi mas marami. Ang layunin ay punan ang mga puwang ng
-      paghihintay, hindi ang barahin ang uplink: kapag sabay-sabay na masyado,
-      pinagkakaagawan ng bawat upload ang parehong makitid na bandwidth at
-      nauuwi sa timeout ang lahat nang sabay — mas mabagal pa kaysa sa isa-isa.
-
-      PERO HINDI LAHAT AY MALAYANG MAGKASABAY. May mga talang tumutukoy sa
-      isa't isa: ang residenteng ginawa sa bahay na walang signal ay maaaring
-      nakatalaga sa sambahayang nasa pila rin, at kailangan munang makarating
-      ang sambahayan bago magkaroon ng id na maipapadala.
-
-      Kaya ikot-ikot ito. Sa bawat ikot, ipinapadala ang lahat ng handa —
-      magkakasabay, dahil magkakahiwalay naman sila. Ang naghintay ay dinadala
-      sa susunod na ikot, kung saan malamang nakarating na ang hinihintay nila.
-      Kapag walang umusad sa isang buong ikot, wala nang maidudulot ang pag-ulit
-      at doon ito humihinto — nakasulat naman sa bawat isa kung ano ang
-      hinihintay nila.
-    */
     let wave = items;
 
     while (wave.length > 0 && !halt) {
-      /** Ang hindi pa handa sa ikot na ito — sila ang susunod na susubukan. */
       const waiting: OutboxItem[] = [];
       let next = 0;
 
@@ -521,24 +332,17 @@ export async function drain(): Promise<void> {
         Array.from({ length: Math.min(CONCURRENCY, wave.length) }, () => worker())
       );
 
-      // Walang naipadala at pareho pa rin ang naghihintay — ang natitira ay
-      // magkakahawak sa isa't isa o naghihintay ng talang kailangan pang
-      // ayusin. Hindi ito maaayos ng isa pang ikot.
       if (waiting.length === wave.length) break;
 
       wave = waiting;
     }
 
-    // Hihinto ang kusang pag-uulit hanggang may bagong login. Itinatakda ito
-    // dito at hindi sa loob ng `send`, para iisa ang lugar na nagpapasiya.
     if (halt === 'auth') pausedForAuth = true;
   } finally {
     running = false;
     await holdScreenAwake(false);
     await publishNow();
 
-    // Kung may naiwan, magtakda ng susunod na subok. Kapag walang natira,
-    // patayin ang timer — walang dahilan para gisingin ang app.
     const remaining = await pending();
 
     if (remaining.length > 0) scheduleRetry();
@@ -546,48 +350,27 @@ export async function drain(): Promise<void> {
   }
 }
 
-/** Ipinagpapatuloy ang pila pagkatapos ng bagong login. */
 export function resumeSync() {
   pausedForAuth = false;
   cancelRetry();
   void drain();
 }
 
-/**
- * Sinisimulan ang pakikinig sa koneksyon. Tinatawag minsan lang, sa root
- * layout ng app.
- */
 export function startSync(): () => void {
   let wasOnline: boolean | null = null;
 
   const subscription = Network.addNetworkStateListener((state) => {
     const isOnline = !!state.isConnected && state.isInternetReachable !== false;
 
-    // Sa sandali lang ng pagbabalik ng koneksyon nagd-drain — hindi sa bawat
-    // ingay ng network state.
     if (isOnline && wasOnline === false) {
       pausedForAuth = false;
       cancelRetry();
       void drain();
-
-      // Ginagamit din ang sandaling ito para punan ang cache.
-      //
-      // Ang pag-init ay tumatakbo lang dati kapag nag-login. Ang taong
-      // naka-login na nang matagal ay hindi kailanman nakakakuha ng bagong
-      // laman hangga't hindi niya binubuksan ang bawat screen — kaya blangko
-      // siya sa lugar na walang signal kahit araw-araw namang dumadaan sa
-      // WiFi. Ang pagbabalik ng koneksyon ang tamang sandali: alam nating
-      // may signal, at hindi naghihintay ang user.
       void warmOfflineData().catch(() => {});
     }
 
     wasOnline = isOnline;
   });
-
-  // Pagbalik ng user sa app mula sa background. Ito ang pinaka-madalas na
-  // sandali kung kailan may bagong signal na: inilabas ang cellphone, may
-  // saklaw na, binuksan ang app. Walang network transition na nangyayari doon
-  // kung nanatiling bukas ang WiFi, kaya hindi sapat ang listener sa itaas.
   const appState = AppState.addEventListener('change', (next) => {
     if (next === 'active') {
       pausedForAuth = false;
@@ -596,16 +379,8 @@ export function startSync(): () => void {
       return;
     }
 
-    // Umalis sa app habang nagpapadala. Binibitawan ang screen — hindi tayo
-    // ang dapat magpasiya kung gising ang telepono kapag wala na tayo sa harap.
     void holdScreenAwake(false);
   });
-
-  // Isang beses sa pagsisimula ng app.
-  //
-  // Kailangan ito: kung nag-reconnect ang cellphone habang SARADO ang app,
-  // walang transition na mangyayari pagbukas mo — mananatiling hindi
-  // naipapadala ang pila hanggang mag-toggle ka ng WiFi.
   void (async () => {
     wasOnline = await isDeviceOnline();
     await publishNow();

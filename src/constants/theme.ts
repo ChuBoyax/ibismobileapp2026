@@ -1,8 +1,4 @@
-/**
- * Design tokens ng Integrated Barangay Information System (IBIS).
- * Isang lugar lang para sa kulay, spacing at radius para pare-pareho
- * ang itsura ng lahat ng screens na idadagdag mamaya.
- */
+
 
 export const Colors = {
   primary: '#1B7A3E',
@@ -24,7 +20,7 @@ export const Colors = {
   surface: '#FFFFFF',
   background: '#F4F7F5',
   onPrimary: '#FFFFFF',
-  /** Translucent na puti — para sa mga button sa loob ng green header. */
+ 
   onPrimaryFaded: 'rgba(255, 255, 255, 0.16)',
 } as const;
 
@@ -54,10 +50,7 @@ export const FontSize = {
   xxl: 26,
 } as const;
 
-/**
- * Malalambot na anino para sa mga card. Hindi `as const` para tanggapin
- * ng StyleSheet ang shadowOffset (kailangan nitong mutable).
- */
+
 export const Shadow = {
   card: {
     shadowColor: '#0A2A18',

@@ -3,14 +3,7 @@ import type { StepDef } from '@/components/form/types';
 import { byId } from './options';
 import type { FormSources } from './sources';
 
-/**
- * Talatanungan para sa isang pamilya, kasunod ng FamilyForm.php ng RBI web.
- *
- * Isang hakbang lang ito dahil pito lang ang field sa web — walang dahilan para
- * hatiin pa. Ang pagtatalaga sa sambahayan ay nasa hiwalay na relation tab sa
- * web; idinagdag ito rito bilang opsyonal dahil sa field, magkasabay na
- * nakikita ang pamilya at ang bahay na tinitirhan nila.
- */
+
 export function familySteps({ options, residents, households }: FormSources): StepDef[] {
   return [
     {
@@ -25,7 +18,7 @@ export function familySteps({ options, residents, households }: FormSources): St
           icon: 'people-circle-outline',
           fields: [
             {
-              // Sa web, pinupunan nito ang pangalan ng pamilya kapag napili.
+            
               name: 'resident_id',
               label: 'Head of Family',
               type: 'select',
