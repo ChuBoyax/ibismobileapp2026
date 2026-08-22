@@ -114,6 +114,7 @@ export function FieldRenderer({ field, values, error, onChange }: FieldRendererP
           hint={field.hint}
           required={required}
           error={error}
+          notFuture={field.notFuture}
           value={asText}
           onChange={(next) => onChange(field.name, next)}
         />

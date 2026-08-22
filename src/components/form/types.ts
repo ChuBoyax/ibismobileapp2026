@@ -159,22 +159,42 @@ export function validateField(
   return null;
 }
 
-function validateDate(field: FieldDef, text: string): string | null {
-  const match = text.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+/**
+ * MM/DD/YYYY patungong Date, o null kapag hindi ito umiiral na petsa.
+ *
+ * Sinasala ng Date ang mga imposibleng petsa tulad ng 02/31 sa pamamagitan
+ * ng pag-usad sa susunod na buwan, kaya inihahambing pabalik ang bahagi.
+ */
+export function parseDateInput(text: string): Date | null {
+  const match = text.trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
 
-  if (!match) return 'Use the format MM/DD/YYYY.';
+  if (!match) return null;
 
   const [, month, day, year] = match;
   const date = new Date(Number(year), Number(month) - 1, Number(day));
 
-  // Sinasala ng Date ang mga imposibleng petsa tulad ng 02/31 sa pamamagitan
-  // ng pag-usad sa susunod na buwan, kaya inihahambing pabalik ang bahagi.
   const valid =
     date.getFullYear() === Number(year) &&
     date.getMonth() === Number(month) - 1 &&
     date.getDate() === Number(day);
 
-  if (!valid) return 'That date does not exist.';
+  return valid ? date : null;
+}
+
+/** Date patungong MM/DD/YYYY — iisa ang anyo ng petsa sa buong form. */
+export function formatDateInput(date: Date): string {
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+
+  return `${month}/${day}/${date.getFullYear()}`;
+}
+
+function validateDate(field: FieldDef, text: string): string | null {
+  if (!/^\d{2}\/\d{2}\/\d{4}$/.test(text.trim())) return 'Use the format MM/DD/YYYY.';
+
+  const date = parseDateInput(text);
+
+  if (!date) return 'That date does not exist.';
 
   if (field.notFuture && date.getTime() > Date.now()) {
     return `${field.label} cannot be in the future.`;
