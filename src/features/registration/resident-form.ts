@@ -3,17 +3,7 @@ import type { FieldDef, FormValues, StepDef } from '@/components/form/types';
 import { byId, byName } from './options';
 import type { FormSources } from './sources';
 
-/**
- * Talatanungan para sa isang residente, kasunod ng ResidentForm.php ng RBI web.
- *
- * Ang web ang batayan dito, hindi ang mga column ng talahanayan: may mga field
- * doon na hindi nakikita sa schema (ang bakuna at edukasyon ay hiwalay na tala)
- * at may mga panuntunan na hindi mahuhulaan sa database (ang edad ang nagtatakda
- * ng voting eligibility). Hinati sa mga hakbang dahil isang mahabang pahina ang
- * web at hindi iyon kayang buhatin ng isang cellphone.
- */
 
-/** Ipinapasa ng web ang mga literal na ito, hindi id ng option. */
 const PWD_REGISTRATION = literal(['Registered', 'Not Registered']);
 const SOLO_PARENT_REGISTRATION = literal(['Registered', 'Not Registered', 'Processing']);
 const SOCIAL_PENSION = literal(['Has Social Pension Number', 'Processing', 'Not Qualified']);
@@ -26,7 +16,7 @@ function literal(values: readonly string[]) {
   return values.map((value) => ({ value, label: value }));
 }
 
-/** Edad mula sa MM/DD/YYYY. Ito ang batayan ng voting eligibility. */
+
 function ageFrom(values: FormValues): number | null {
   const raw = values.date_of_birth;
 
@@ -50,7 +40,7 @@ function ageFrom(values: FormValues): number | null {
   return age >= 0 ? age : null;
 }
 
-/** Pangalan ng option mula sa id — ginagamit ng mga kondisyon sa status. */
+
 const labelOf = (options: FormSources['options'], category: string, value: unknown) =>
   typeof value === 'string'
     ? (options[category]?.find((option) => String(option.id) === value)?.name ?? null)
@@ -116,8 +106,7 @@ export function residentSteps({ options, households, families, residents }: Form
               notFuture: true,
             },
             {
-              // Sinusundan lang nito ang petsa ng kapanganakan gaya ng web,
-              // kaya nakasara ito sa pag-edit at hindi ipinapadala sa server.
+             
               name: 'age_display',
               label: 'Age',
               type: 'computed',
@@ -143,7 +132,7 @@ export function residentSteps({ options, households, families, residents }: Form
               required: true,
             },
             {
-              // Maramihan ito sa web at array ang naiimbak sa database.
+             
               name: 'citizenship',
               label: 'Citizenship',
               type: 'multiselect',
@@ -216,8 +205,7 @@ export function residentSteps({ options, households, families, residents }: Form
           icon: 'phone-portrait-outline',
           fields: [
             {
-              // Labing-isang digit ang hinahanap ng web at doon din ipinapakita
-              // ang "too short / too long" habang nagta-type.
+             
               name: 'contact_number',
               label: 'Contact number',
               type: 'text',
@@ -437,7 +425,7 @@ export function residentSteps({ options, households, families, residents }: Form
           description: 'Batayan ito ng mga programa at ayuda ng barangay.',
           icon: 'ribbon-outline',
           fields: [
-            // `lgbt` ang tunay na column; `lgbtq` sa web ay pang-gate lang.
+          
             { name: 'lgbt', label: 'LGBTQ+', type: 'toggle' },
             {
               name: 'lgbtq_id',
@@ -523,8 +511,7 @@ export function residentSteps({ options, households, families, residents }: Form
               required: (v) =>
                 v.solo_parent === true && v.solo_parent_registration_status === 'Registered',
             },
-            // Walang `ethnicity` na column — pang-bukas lang ito ng pagpili,
-            // gaya rin ng ginagawa nito sa web.
+          
             { name: 'ethnicity', label: 'Ethnicity', type: 'toggle' },
             {
               name: 'ethnicity_id',
@@ -572,8 +559,7 @@ export function residentSteps({ options, households, families, residents }: Form
           icon: 'checkmark-circle-outline',
           fields: [
             {
-              // Sa web ay naka-disable ito at ang edad ang nagtatakda. Ganoon
-              // din dito: nababasa pero hindi nababago.
+             
               name: 'voting_eligibility_display',
               label: 'Voting eligibility',
               type: 'computed',
@@ -731,7 +717,7 @@ export function residentSteps({ options, households, families, residents }: Form
     },
   ];
 
-  /** Ang mga antas na may kaakibat na kurso. */
+  
   function isTertiary(opts: FormSources['options'], item: FormValues): boolean {
     const name = labelOf(opts, 'educational_attainment_school', item.educational_attainment_school_id);
 
@@ -739,7 +725,7 @@ export function residentSteps({ options, households, families, residents }: Form
   }
 }
 
-/** Toggle at ang numerong kasama nito — limang beses itong inuulit sa web. */
+
 function idPair(
   toggleName: string,
   toggleLabel: string,

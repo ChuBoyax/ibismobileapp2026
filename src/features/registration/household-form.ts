@@ -4,12 +4,7 @@ import type { StepDef } from '@/components/form/types';
 import { byId } from './options';
 import type { FormSources } from './sources';
 
-/**
- * Talatanungan para sa isang sambahayan, ayon sa `households` na talahanayan
- * ng RBI web — pati ang mga field na idinagdag sa mga huling migration:
- * potability ng tubig, negosyo, hazard at koordinado.
- */
-/** Mga literal na halaga — hindi id ng option ang ipinapadala ng web dito. */
+
 function literal(values: readonly string[]) {
   return values.map((value) => ({ value, label: value }));
 }
@@ -143,8 +138,7 @@ export function householdSteps({ options }: FormSources): StepDef[] {
               required: true,
             },
             {
-              // Lumalabas lang kapag may pinagkukunan na ng inuming tubig, at
-              // ang basehan naman ay kapag Potable — ganito rin ang web.
+             
               name: 'water_potability',
               label: 'Water Potability',
               type: 'select',
@@ -270,8 +264,7 @@ export function householdSteps({ options }: FormSources): StepDef[] {
           icon: 'warning-outline',
           fields: [
             {
-              // Pivot ang hawak nito sa web (household_hazard_type), hindi ang
-              // magkakahiwalay na boolean na column.
+            
               name: 'hazard_types',
               label: 'Hazards affecting this household',
               type: 'multiselect',

@@ -4,32 +4,13 @@ import { ApiError } from '@/lib/api';
 import { clearSession, getSavedEmail, isOfflineSession } from '@/lib/auth-storage';
 import { clearCache } from '@/lib/db';
 import { clearOutbox } from '@/lib/outbox';
-// Ang talaan ng naipadala ay pag-aari ng gumamit, hindi ng cellphone —
-// hindi ito dapat makita ng susunod na papasok.
 import { clearHistory } from '@/lib/sync-history';
 
-/**
- * Tinatapos ang session — ang token lang.
- *
- * Hindi kasama ang PIN, fingerprint, profile at naka-save na datos. Lahat
- * iyon ay pag-aari ng taong huling gumamit, at siya rin ang malamang na
- * babalik. Kapag ibang tao na ang nag-login, doon nililinis (switchUser).
- */
+
 export async function endSession(): Promise<void> {
-  // Token lang ang tinatapos. Nananatili ang profile at ang naka-save na
-  // datos — pag-aari iyon ng taong iyon, at siya rin ang babalik. Kapag ibang
-  // tao na ang nag-login, doon lang nililinis (tingnan ang switchUser).
   await clearSession();
 }
 
-/**
- * Tinatawag pagkatapos ng matagumpay na ONLINE na login.
- *
- * Kung iba na ang nag-login kaysa sa huling gumamit ng cellphone na ito,
- * nililinis ang lahat ng naiwan ng nauna: hindi dapat makita ng bagong user
- * ang dashboard, ulat, at lalo na ang hindi pa naipapadalang tala ng iba —
- * kung masi-sync iyon gamit ang kanyang token, mali ang pagkakatala.
- */
 export async function switchUser(email: string): Promise<void> {
   const previous = (await getSavedEmail())?.trim().toLowerCase();
   const next = email.trim().toLowerCase();
@@ -57,13 +38,6 @@ export async function handleAuthError(error: unknown): Promise<boolean> {
     return false;
   }
 
-  // Nasa offline na pagpasok siya: walang token, kaya inaasahan ang 401 sa
-  // sandaling bumalik ang koneksyon. HINDI SIYA ITINATAPON PALABAS.
-  //
-  // Nagtatrabaho ang tao, bumalik ang signal, at bigla siyang mawawala sa
-  // ginagawa niya — iyon ang mangyayari kung ibabalik siya sa login dito.
-  // Sa halip: nananatili siya sa naka-save na datos, at ang sync pill ang
-  // magsasabing kailangan na niyang mag-login para maipadala ang naipon.
   if (await isOfflineSession()) {
     return true;
   }
